@@ -314,7 +314,7 @@ bool RpcServer::processJsonRpcRequest(const HttpRequest& request, HttpResponse& 
         {"get_outputs_for_address", {makeMemberMethod(&RpcServer::on_get_outputs_for_address), false}},
         {"export_headers", {makeMemberMethod(&RpcServer::on_export_headers), false}},
         {"get_spv_outputs", {makeMemberMethod(&RpcServer::on_get_spv_outputs), false}},
-        {"get_wallet_snapshot", {makeMemberMethod(&RpcServer::on_get_wallet_snapshot), false}},
+        {"get_wallet_snapshot", {makeMemberMethod(&RpcServer::on_get_wallet_snapshot), true}},
     };
 
     auto it = jsonRpcHandlers.find(jsonRequest.getMethod());
@@ -2164,7 +2164,7 @@ bool RpcServer::on_get_wallet_snapshot(const COMMAND_RPC_GET_WALLET_SNAPSHOT::re
         tx_pub_keys.push_back(pk);
     }
 
-    if (!!m_core.getMdbxStorage())
+    if (!m_core.getMdbxStorage())
     {
       // Fallback: no MDBX indexes available — return empty snapshot
       std::ostringstream json;

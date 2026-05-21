@@ -85,6 +85,22 @@ namespace BoltRPC
       return response;
     }
 
+    bool isRpcErrorEnvelope(const common::JsonValue &v)
+    {
+      return v.isObject() && v.contains("error") && v("error").isObject();
+    }
+
+    common::JsonValue normalizeParams(const common::JsonValue &request)
+    {
+      common::JsonValue params(common::JsonValue::OBJECT);
+      if (!request.isObject() || !request.contains("params"))
+        return params;
+      const common::JsonValue &p = request("params");
+      if (p.isObject())
+        return p;
+      return params;
+    }
+
   } // anonymous namespace
 
   // ─── Constructor / Destructor ──────────────────────────────────────────────
@@ -108,8 +124,16 @@ namespace BoltRPC
         {
           std::string body = R"({"jsonrpc":"2.0","id":1,"method":")" + method + R"(","params":)" + paramsJson + "}";
           BoltHttp::HttpClient client(m_daemonHost, m_daemonPort);
-          BoltHttp::HttpClientResponse response = client.post("/json_rpc", body);
-          return response.body;
+          const int timeoutSec = (method == "get_wallet_snapshot") ? 600 : 60;
+          BoltHttp::HttpClientResponse response = client.post("/json_rpc", body, timeoutSec);
+          if (!response.body.empty())
+            return response.body;
+          if (!response.error.empty())
+          {
+            return R"({"jsonrpc":"2.0","id":1,"error":{"code":-1,"message":")" +
+                   response.error + R"(("}})";
+          }
+          return R"({"jsonrpc":"2.0","id":1,"error":{"code":-1,"message":"empty HTTP response from daemon"}})";
         });
 
     registerMethods();
@@ -288,10 +312,20 @@ namespace BoltRPC
         return;
       }
 
+      if (!request.isObject())
+      {
+        responseBody = makeJsonRpcErrorEnvelope(JSON_RPC_INVALID_REQUEST, "Invalid Request").toString();
+        return;
+      }
+
+      if (!request.contains("method") || !request("method").isString())
+      {
+        responseBody = makeJsonRpcErrorEnvelope(JSON_RPC_INVALID_REQUEST, "Missing or invalid method").toString();
+        return;
+      }
+
       std::string method = request("method").getString();
-      common::JsonValue params(common::JsonValue::OBJECT);
-      if (request.contains("params"))
-        params = request("params");
+      common::JsonValue params = normalizeParams(request);
       common::JsonValue id;
       if (request.contains("id"))
         id = request("id");
@@ -312,7 +346,15 @@ namespace BoltRPC
 
       common::JsonValue result = handler(params);
 
-      if (result.contains("error"))
+      if (!result.isObject())
+      {
+        responseBody = makeJsonRpcErrorEnvelope(JSON_RPC_INTERNAL_ERROR,
+                                                "Invalid handler result", id)
+                           .toString();
+        return;
+      }
+
+      if (isRpcErrorEnvelope(result))
         baseResponse.insert("error", result("error"));
       else
         baseResponse.insert("result", result);
@@ -324,6 +366,10 @@ namespace BoltRPC
       responseBody = makeJsonRpcErrorEnvelope(JSON_RPC_INTERNAL_ERROR,
                                               std::string("Internal error: ") + e.what())
                            .toString();
+    }
+    catch (...)
+    {
+      responseBody = makeJsonRpcErrorEnvelope(JSON_RPC_INTERNAL_ERROR, "Internal error").toString();
     }
   }
 

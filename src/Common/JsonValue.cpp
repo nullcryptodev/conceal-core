@@ -537,7 +537,10 @@ const JsonValue& JsonValue::operator()(const Key& key) const {
 }
 
 bool JsonValue::contains(const Key& key) const {
-  return getObject().count(key) > 0;
+  if (type != OBJECT) {
+    return false;
+  }
+  return reinterpret_cast<const Object*>(valueObject)->count(key) > 0;
 }
 
 JsonValue& JsonValue::insert(const Key& key, const JsonValue& value) {
@@ -590,6 +593,48 @@ std::string JsonValue::toString() const {
   return stream.str();
 }
 
+namespace {
+
+void writeEscapedJsonString(std::ostream& out, const std::string& s) {
+  out << '"';
+  for (char c : s) {
+    switch (c) {
+    case '"':
+      out << "\\\"";
+      break;
+    case '\\':
+      out << "\\\\";
+      break;
+    case '\b':
+      out << "\\b";
+      break;
+    case '\f':
+      out << "\\f";
+      break;
+    case '\n':
+      out << "\\n";
+      break;
+    case '\r':
+      out << "\\r";
+      break;
+    case '\t':
+      out << "\\t";
+      break;
+    default:
+      if (static_cast<unsigned char>(c) < 0x20) {
+        out << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(static_cast<unsigned char>(c))
+            << std::dec << std::setfill(' ');
+      } else {
+        out << c;
+      }
+      break;
+    }
+  }
+  out << '"';
+}
+
+} // namespace
+
 std::ostream& operator<<(std::ostream& out, const JsonValue& jsonValue) {
   switch (jsonValue.type) {
   case JsonValue::ARRAY: {
@@ -641,7 +686,7 @@ std::ostream& operator<<(std::ostream& out, const JsonValue& jsonValue) {
     break;
   }
   case JsonValue::STRING:
-    out << '"' << *reinterpret_cast<const JsonValue::String*>(jsonValue.valueString) << '"';
+    writeEscapedJsonString(out, *reinterpret_cast<const JsonValue::String*>(jsonValue.valueString));
     break;
   }
 

@@ -114,7 +114,20 @@ namespace BoltRPC
         std::vector<OutputInfo> &outputs,
         std::unordered_set<std::string> &spentKeyImages,
         std::vector<crypto::PublicKey> &newTxPubKeys,
-        uint32_t &currentHeight);
+        uint32_t &currentHeight,
+        std::string *errorOut = nullptr,
+        SyncProgress *progressOut = nullptr);
+
+    // Query outputs/spent images in batches (avoids multi‑hundred‑MB get_wallet_snapshot requests).
+    bool fetchOutputsForKeys(
+        const std::vector<crypto::PublicKey> &keys,
+        uint32_t walletHeight,
+        std::vector<OutputInfo> &outputs,
+        std::unordered_set<std::string> &spentKeyImages,
+        std::vector<crypto::PublicKey> &additionalKeys,
+        uint32_t &currentHeight,
+        SyncProgress *progress,
+        std::string *errorOut = nullptr);
 
     // ── Local derivation ───────────────────────────────────────────────────
     void deriveOwnedOutputs(
@@ -152,6 +165,7 @@ namespace BoltRPC
 
     static constexpr uint32_t POLL_INTERVAL_SECONDS = 30;
     static constexpr size_t MAX_OUTPUTS_PER_CALL = 50000;
+    static constexpr size_t WALLET_SNAPSHOT_KEY_BATCH_SIZE = 5000;
   };
 
 } // namespace BoltRPC

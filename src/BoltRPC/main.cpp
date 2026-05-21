@@ -284,9 +284,13 @@ int main(int argc, char *argv[])
 
     if (initEc)
     {
-      logger(ERROR, BRIGHT_RED) << "Failed to connect to daemon: " << initEc.message();
+      logger(ERROR, BRIGHT_RED) << "Failed to connect to daemon: " << initEc.message()
+                                << " (is conceald-archive running and RPC reachable?)";
+      nodePtr->shutdown();
       delete nodePtr;
+      nodePtr = nullptr;
       delete dispatcherPtr;
+      dispatcherPtr = nullptr;
       return 1;
     }
 

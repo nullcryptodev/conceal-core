@@ -121,6 +121,7 @@ namespace BoltRPC
     std::thread m_httpThread;
 
     static constexpr int JSON_RPC_PARSE_ERROR = -32700;
+    static constexpr int JSON_RPC_INVALID_REQUEST = -32600;
     static constexpr int JSON_RPC_METHOD_NOT_FOUND = -32601;
     static constexpr int JSON_RPC_INVALID_PARAMS = -32602;
     static constexpr int JSON_RPC_INTERNAL_ERROR = -32603;

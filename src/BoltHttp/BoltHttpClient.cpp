@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <sstream>
+#include <string>
 
 namespace BoltHttp
 {
@@ -21,12 +22,40 @@ namespace BoltHttp
   {
     if (m_socket >= 0)
     {
-      shutdown(m_socket, SHUT_RDWR);
+      ::shutdown(m_socket, SHUT_RDWR);
       close(m_socket);
     }
   }
 
-  bool HttpClient::connect()
+  namespace
+  {
+
+    size_t parseContentLength(const std::string &headers)
+    {
+      size_t pos = 0;
+      while (pos < headers.size())
+      {
+        size_t lineEnd = headers.find("\r\n", pos);
+        if (lineEnd == std::string::npos)
+          break;
+        std::string line = headers.substr(pos, lineEnd - pos);
+        const std::string prefix = "Content-Length:";
+        if (line.size() >= prefix.size() &&
+            line.compare(0, prefix.size(), prefix) == 0)
+        {
+          size_t i = prefix.size();
+          while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+            ++i;
+          return static_cast<size_t>(std::stoull(line.substr(i)));
+        }
+        pos = lineEnd + 2;
+      }
+      return 0;
+    }
+
+  } // namespace
+
+  bool HttpClient::connect(int recvTimeoutSec)
   {
     m_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (m_socket < 0)
@@ -44,9 +73,8 @@ namespace BoltHttp
       return false;
     }
 
-    // Do not block shutdown indefinitely on slow daemon RPC (e.g. archive snapshot).
     struct timeval tv;
-    tv.tv_sec = 10;
+    tv.tv_sec = recvTimeoutSec;
     tv.tv_usec = 0;
     setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(m_socket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -54,11 +82,73 @@ namespace BoltHttp
     return true;
   }
 
-  HttpClientResponse HttpClient::post(const std::string &path, const std::string &body)
+  HttpClientResponse HttpClient::readHttpResponse(int socket)
+  {
+    HttpClientResponse resp;
+    char buf[65536];
+    std::string raw;
+    while (true)
+    {
+      ssize_t n = recv(socket, buf, sizeof(buf), 0);
+      if (n < 0)
+      {
+        if (!raw.empty())
+          break;
+        resp.error = "Failed to read HTTP response";
+        return resp;
+      }
+      if (n == 0)
+        break;
+      raw.append(buf, static_cast<size_t>(n));
+    }
+
+    size_t headerEnd = raw.find("\r\n\r\n");
+    if (headerEnd == std::string::npos)
+    {
+      resp.error = "Invalid HTTP response";
+      return resp;
+    }
+
+    std::string headers = raw.substr(0, headerEnd);
+    std::istringstream headerStream(headers);
+    std::string statusLine;
+    std::getline(headerStream, statusLine);
+
+    size_t codeStart = statusLine.find(' ');
+    if (codeStart != std::string::npos)
+    {
+      std::string codeStr = statusLine.substr(codeStart + 1, 3);
+      resp.statusCode = std::stoi(codeStr);
+    }
+
+    const size_t bodyStart = headerEnd + 4;
+    const size_t contentLength = parseContentLength(headers);
+    if (contentLength > 0)
+    {
+      if (raw.size() < bodyStart + contentLength)
+      {
+        resp.error = "Incomplete HTTP response (expected " + std::to_string(contentLength) +
+                     " bytes, got " + std::to_string(raw.size() - bodyStart) +
+                     "). Try increasing daemon RPC timeout or check network.";
+        return resp;
+      }
+      resp.body = raw.substr(bodyStart, contentLength);
+    }
+    else
+    {
+      resp.body = raw.substr(bodyStart);
+    }
+
+    resp.success = (resp.statusCode >= 200 && resp.statusCode < 300);
+    return resp;
+  }
+
+  HttpClientResponse HttpClient::post(const std::string &path, const std::string &body,
+                                      int recvTimeoutSec)
   {
     HttpClientResponse resp;
 
-    if (!connect())
+    if (!connect(recvTimeoutSec))
     {
       resp.error = "Failed to connect to " + m_host + ":" + std::to_string(m_port);
       return resp;
@@ -81,50 +171,15 @@ namespace BoltHttp
       return resp;
     }
 
-    // Read response
-    char buf[4096];
-    std::string raw;
-    while (true)
-    {
-      ssize_t n = recv(m_socket, buf, sizeof(buf) - 1, 0);
-      if (n <= 0)
-        break;
-      buf[n] = '\0';
-      raw += buf;
-    }
-
-    // Parse response
-    size_t headerEnd = raw.find("\r\n\r\n");
-    if (headerEnd == std::string::npos)
-    {
-      resp.error = "Invalid HTTP response";
-      return resp;
-    }
-
-    // Parse status line
-    std::string headers = raw.substr(0, headerEnd);
-    std::istringstream headerStream(headers);
-    std::string statusLine;
-    std::getline(headerStream, statusLine);
-
-    size_t codeStart = statusLine.find(' ');
-    if (codeStart != std::string::npos)
-    {
-      std::string codeStr = statusLine.substr(codeStart + 1, 3);
-      resp.statusCode = std::stoi(codeStr);
-    }
-
-    resp.body = raw.substr(headerEnd + 4);
-    resp.success = (resp.statusCode >= 200 && resp.statusCode < 300);
-
+    resp = readHttpResponse(m_socket);
     return resp;
   }
 
-  HttpClientResponse HttpClient::get(const std::string &path)
+  HttpClientResponse HttpClient::get(const std::string &path, int recvTimeoutSec)
   {
     HttpClientResponse resp;
 
-    if (!connect())
+    if (!connect(recvTimeoutSec))
     {
       resp.error = "Failed to connect to " + m_host + ":" + std::to_string(m_port);
       return resp;
@@ -144,39 +199,6 @@ namespace BoltHttp
       return resp;
     }
 
-    char buf[4096];
-    std::string raw;
-    while (true)
-    {
-      ssize_t n = recv(m_socket, buf, sizeof(buf) - 1, 0);
-      if (n <= 0)
-        break;
-      buf[n] = '\0';
-      raw += buf;
-    }
-
-    size_t headerEnd = raw.find("\r\n\r\n");
-    if (headerEnd == std::string::npos)
-    {
-      resp.error = "Invalid HTTP response";
-      return resp;
-    }
-
-    std::string headers = raw.substr(0, headerEnd);
-    std::istringstream headerStream(headers);
-    std::string statusLine;
-    std::getline(headerStream, statusLine);
-
-    size_t codeStart = statusLine.find(' ');
-    if (codeStart != std::string::npos)
-    {
-      std::string codeStr = statusLine.substr(codeStart + 1, 3);
-      resp.statusCode = std::stoi(codeStr);
-    }
-
-    resp.body = raw.substr(headerEnd + 4);
-    resp.success = (resp.statusCode >= 200 && resp.statusCode < 300);
-
-    return resp;
+    return readHttpResponse(m_socket);
   }
 }
