@@ -22,11 +22,27 @@
 #define CN_ADD_TARGETS_AND_HEADERS
 #define INTEL_AVX2
 
+#include "../cn_gpu_inner_trace.h"
 #include "../keccak.h"
 #include "aux_hash.h"
 #include "cn_slow_hash.hpp"
 
+#include <cstdio>
+
 #ifdef HAS_INTEL_HW
+
+namespace
+{
+void traceM256i(const char* label, __m256i v)
+{
+  alignas(32) int32_t a[8];
+  _mm256_storeu_si256(reinterpret_cast<__m256i*>(a), v);
+  std::fprintf(stderr, "[cn-gpu-trace-avx] %s", label);
+  for (int i = 0; i < 8; ++i)
+    std::fprintf(stderr, " %d", a[i]);
+  std::fprintf(stderr, "\n");
+}
+} // namespace
 
 ATTRIBUTE
 inline void prep_dv_avx(cn_sptr& idx, __m256i& v, __m256& n01)
@@ -138,14 +154,16 @@ inline void double_comupte_wrap(const __m256& n0, const __m256& n1, const __m256
 }
 
 template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
-void ATTRIBUTE cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3_avx()
+void ATTRIBUTE cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3_avx_iters(size_t iters)
 {
+	if(iters > ITER)
+		iters = ITER;
 	uint32_t s = spad.as_dword(0) >> 8;
 	cn_sptr idx0 = scratchpad_ptr(s, 0);
 	cn_sptr idx2 = scratchpad_ptr(s, 2);
 	__m256 sum0 = _mm256_setzero_ps();
 
-	for(size_t i = 0; i < ITER; i++)
+	for(size_t i = 0; i < iters; i++)
 	{
 		__m256i v01, v23;
 		__m256 suma, sumb, sum1;
@@ -169,6 +187,13 @@ void ATTRIBUTE cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3_av
 		_mm256_store_si256(idx0.as_ptr<__m256i>(), _mm256_xor_si256(v01, out));
 		sum0 = _mm256_add_ps(suma, sumb);
 		out2 = out;
+		if (crypto::cn_gpu_inner_trace_enabled() && i == 0)
+		{
+			std::fprintf(stderr, "[cn-gpu-trace-avx] iter0 s=%u idx0_off=%zu idx2_off=%zu\n", s,
+			             idx0.as_byte() - lpad.as_byte(), idx2.as_byte() - lpad.as_byte());
+			traceM256i("out_after_blk0", out);
+			crypto::cn_gpu_dump_scratchpad_words("cpu_avx_after_iter0", scratchpad_data(), 809920, 8);
+		}
 
 		__m256 n11, n02, n30;
 		n11 = _mm256_permute2f128_ps(n01, n01, 0x11);
@@ -209,6 +234,12 @@ void ATTRIBUTE cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3_av
 		idx0 = scratchpad_ptr(n, 0);
 		idx2 = scratchpad_ptr(n, 2);
 	}
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void ATTRIBUTE cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3_avx()
+{
+	inner_hash_3_avx_iters(ITER);
 }
 
 template class cn_v1_hash_t;

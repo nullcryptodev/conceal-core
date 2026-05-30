@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -11,18 +11,22 @@
 
 #include <boost/program_options.hpp>
 
-namespace cn {
+namespace cn
+{
 
-class CoreConfig {
-public:
-  CoreConfig();
+  class CoreConfig
+  {
+  public:
+    CoreConfig();
 
-  static void initOptions(const boost::program_options::options_description& desc);
-  void init(const boost::program_options::variables_map& options);
+    static void initOptions(const boost::program_options::options_description &desc);
+    void init(const boost::program_options::variables_map &options);
 
-  std::string configFolder;
-  bool configFolderDefaulted = true;
-  bool testnet = false;
-};
+    std::string configFolder;
+    bool configFolderDefaulted = true;
+    bool testnet = false;
+    bool enableWalletIndexes = false;
+    bool rebuildWalletIndexes = false;
+  };
 
-} //namespace cn
+} // namespace cn

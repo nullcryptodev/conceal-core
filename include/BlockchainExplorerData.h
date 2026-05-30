@@ -38,8 +38,14 @@ struct TransactionOutputDetails {
 
   boost::variant<
     TransactionOutputToKeyDetails,
-    TransactionOutputMultisignatureDetails> output;
+    TransactionOutputMultisignatureDetails,
+    // New post-fork output detail types
+    TransactionOutputStandardPaymentDetails,
+    TransactionOutputMultisigPaymentDetails,
+    TransactionOutputDomainRegistrationDetails,
+    TransactionOutputDomainDeletionDetails> output;
 };
+// TransactionOutput*Details types are defined in include/CryptoTypes.h
 
 struct TransactionOutputReferenceDetails {
   crypto::Hash transactionHash;

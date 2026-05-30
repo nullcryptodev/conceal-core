@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -88,6 +88,22 @@ transaction_types::OutputType getTransactionOutputType(const TransactionOutputTa
   }
   if (out.type() == typeid(MultisignatureOutput)) {
     return transaction_types::OutputType::Multisignature;
+  }
+  if (out.type() == typeid(StandardPaymentOutput))
+  {
+    return transaction_types::OutputType::StandardPayment;
+  }
+  if (out.type() == typeid(MultisigPaymentOutput))
+  {
+    return transaction_types::OutputType::MultisigPayment;
+  }
+  if (out.type() == typeid(DomainRegistrationOutput))
+  {
+    return transaction_types::OutputType::DomainRegistration;
+  }
+  if (out.type() == typeid(DomainDeletionOutput))
+  {
+    return transaction_types::OutputType::DomainDeletion;
   }
   return transaction_types::OutputType::Invalid;
 }

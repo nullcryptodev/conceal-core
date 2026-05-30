@@ -75,6 +75,7 @@ public:
       uint64_t& reward, int64_t& emissionChange) override;
   virtual bool scanOutputkeysForIndices(const cn::KeyInput& txInToKey, std::list<std::pair<crypto::Hash, size_t>>& outputReferences) override;
   virtual bool getBlockDifficulty(uint32_t height, cn::difficulty_type& difficulty) override;
+  uint64_t getNextBlockDifficulty() override { return 1; }
   bool getBlockTimestamp(uint32_t height, uint64_t &timestamp) override { return false; }
   virtual bool getBlockContainingTx(const crypto::Hash& txId, crypto::Hash& blockId, uint32_t& blockHeight) override;
   virtual bool getMultisigOutputReference(const cn::MultisignatureInput& txInMultisig, std::pair<crypto::Hash, size_t>& outputReference) override;

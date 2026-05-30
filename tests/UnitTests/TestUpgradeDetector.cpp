@@ -8,7 +8,7 @@
 #include "gtest/gtest.h"
 
 #include "CryptoNoteCore/CryptoNoteBasic.h"
-#include "CryptoNoteCore/UpgradeDetector.h"
+#include "Blockchain/UpgradeDetector.h"
 
 #include "Logging/ConsoleLogger.h"
 

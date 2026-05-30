@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -13,54 +13,63 @@
 
 #include <boost/program_options.hpp>
 #include "P2pProtocolTypes.h"
+#include "CryptoNoteConfig.h"
 
-namespace cn {
+namespace cn
+{
 
-class NetNodeConfig {
-public:
-  NetNodeConfig();
-  static void initOptions(boost::program_options::options_description& desc);
-  bool init(const boost::program_options::variables_map& vm);
+  class NetNodeConfig
+  {
+  public:
+    NetNodeConfig();
+    static void initOptions(boost::program_options::options_description &desc);
+    bool init(const boost::program_options::variables_map &vm);
 
-  std::string getP2pStateFilename() const;
-  bool getTestnet() const;
-  std::string getBindIp() const;
-  uint16_t getBindPort() const;
-  uint16_t getExternalPort() const;
-  bool getAllowLocalIp() const;
-  std::vector<PeerlistEntry> getPeers() const;
-  std::vector<NetworkAddress> getPriorityNodes() const;
-  std::vector<NetworkAddress> getExclusiveNodes() const;
-  std::vector<NetworkAddress> getSeedNodes() const;
-  bool getHideMyPort() const;
-  std::string getConfigFolder() const;
+    std::string getP2pStateFilename() const;
+    bool getTestnet() const;
+    std::string getBindIp() const;
+    uint16_t getBindPort() const;
+    uint16_t getExternalPort() const;
+    bool getAllowLocalIp() const;
+    std::vector<PeerlistEntry> getPeers() const;
+    std::vector<NetworkAddress> getPriorityNodes() const;
+    std::vector<NetworkAddress> getExclusiveNodes() const;
+    std::vector<NetworkAddress> getSeedNodes() const;
+    bool getHideMyPort() const;
+    std::string getConfigFolder() const;
+    size_t getMinOutgoingConnections() const;
+    size_t getMaxOutgoingConnections() const;
 
-  void setP2pStateFilename(const std::string& filename);
-  void setTestnet(bool isTestnet);
-  void setBindIp(const std::string& ip);
-  void setBindPort(uint16_t port);
-  void setExternalPort(uint16_t port);
-  void setAllowLocalIp(bool allow);
-  void setPeers(const std::vector<PeerlistEntry>& peerList);
-  void setPriorityNodes(const std::vector<NetworkAddress>& addresses);
-  void setExclusiveNodes(const std::vector<NetworkAddress>& addresses);
-  void setSeedNodes(const std::vector<NetworkAddress>& addresses);
-  void setHideMyPort(bool hide);
-  void setConfigFolder(const std::string& folder);
+    void setP2pStateFilename(const std::string &filename);
+    void setTestnet(bool isTestnet);
+    void setBindIp(const std::string &ip);
+    void setBindPort(uint16_t port);
+    void setExternalPort(uint16_t port);
+    void setAllowLocalIp(bool allow);
+    void setPeers(const std::vector<PeerlistEntry> &peerList);
+    void setPriorityNodes(const std::vector<NetworkAddress> &addresses);
+    void setExclusiveNodes(const std::vector<NetworkAddress> &addresses);
+    void setSeedNodes(const std::vector<NetworkAddress> &addresses);
+    void setHideMyPort(bool hide);
+    void setConfigFolder(const std::string &folder);
+    void setMinOutgoingConnections(size_t count);
+    void setMaxOutgoingConnections(size_t count);
 
-private:
-  std::string bindIp;
-  uint16_t bindPort;
-  uint16_t externalPort;
-  bool allowLocalIp;
-  std::vector<PeerlistEntry> peers;
-  std::vector<NetworkAddress> priorityNodes;
-  std::vector<NetworkAddress> exclusiveNodes;
-  std::vector<NetworkAddress> seedNodes;
-  bool hideMyPort;
-  std::string configFolder;
-  std::string p2pStateFilename;
-  bool testnet;
-};
+  private:
+    std::string bindIp;
+    uint16_t bindPort;
+    uint16_t externalPort;
+    bool allowLocalIp;
+    std::vector<PeerlistEntry> peers;
+    std::vector<NetworkAddress> priorityNodes;
+    std::vector<NetworkAddress> exclusiveNodes;
+    std::vector<NetworkAddress> seedNodes;
+    bool hideMyPort;
+    std::string configFolder;
+    std::string p2pStateFilename;
+    bool testnet;
+    size_t minOutgoingConnections = cn::P2P_DEFAULT_MIN_CONNECTIONS;
+    size_t maxOutgoingConnections = cn::P2P_DEFAULT_MAX_CONNECTIONS;
+  };
 
-} //namespace nodetool
+} // namespace nodetool

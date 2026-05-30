@@ -45,7 +45,7 @@ public:
   bool isConnected() const;
 
 private:
-  void connect();
+  bool connect();
   void disconnect();
 
   const std::string m_address;

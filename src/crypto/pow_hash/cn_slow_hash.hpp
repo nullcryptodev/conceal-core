@@ -202,6 +202,18 @@ class cn_slow_hash
 		free_mem();
 	}
 
+	/** CN-GPU (VERSION==2): staged path for optional GPU inner-loop offload */
+	void cn_gpu_prepare_inner(const void* in, size_t len);
+	void cn_gpu_prepare_mining(const void* in, size_t len, uint32_t nonce);
+	void cn_gpu_run_inner();
+	void cn_gpu_run_inner_reference();
+	void cn_gpu_run_inner_reference_iters(size_t iters);
+	void cn_gpu_run_inner_sse_iters(size_t iters);
+	void cn_gpu_finish(void* out);
+	uint8_t* scratchpad_data() { return lpad.as_byte(); }
+	uint8_t* state_data() { return spad.as_byte(); }
+	static constexpr size_t memory_bytes() { return MEMORY; }
+
 	void hash(const void* in, size_t len, void* out)
 	{
 		if(CN_SLOW_HASH_VERSION <= 1)
@@ -299,7 +311,9 @@ class cn_slow_hash
 	void implode_scratchpad_soft();
 
 	void inner_hash_3();
+	void inner_hash_3_iters(size_t iters);
 	void ATTRIBUTE inner_hash_3_avx();
+	void ATTRIBUTE inner_hash_3_avx_iters(size_t iters);
 
 	cn_sptr lpad;
 	cn_sptr spad;

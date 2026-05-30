@@ -1,6 +1,13 @@
 add_definitions(-DMINIUPNP_STATICLIB)
 
-include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR} ../version)
+include_directories(
+  ${gtest_SOURCE_DIR}/include
+  ${gtest_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/version
+  ${CMAKE_SOURCE_DIR}/src
+  ${MDBX_INCLUDE_DIR}
+  ${CMAKE_SOURCE_DIR}/external/mdbx)
+
 
 file(GLOB_RECURSE CoreTests CoreTests/*)
 file(GLOB_RECURSE CryptoTests crypto/*)
@@ -35,26 +42,64 @@ add_executable(UnitTests ${UnitTests})
 add_executable(DifficultyTests Difficulty/Difficulty.cpp)
 add_executable(HashTargetTests HashTarget.cpp)
 add_executable(HashTests Hash/main.cpp)
+add_executable(PowGpuEquivalenceTests pow_gpu_equivalence.cpp)
+add_executable(PowGpuMineEquivalenceTests pow_gpu_mine_equivalence.cpp)
 
-target_link_libraries(CoreTests TestGenerator CryptoNoteCore Serialization System Logging Common crypto BlockchainExplorer ${Boost_LIBRARIES})
-target_link_libraries(IntegrationTests IntegrationTestLibrary Wallet NodeRpcProxy InProcessNode P2P Rpc Http Transfers Serialization System CryptoNoteCore Logging Common crypto BlockchainExplorer gtest libminiupnpc-static ${Boost_LIBRARIES})
-target_link_libraries(NodeRpcProxyTests NodeRpcProxy CryptoNoteCore Rpc Http Serialization System Logging Common crypto ${Boost_LIBRARIES})
-target_link_libraries(PerformanceTests CryptoNoteCore Serialization Logging Common crypto ${Boost_LIBRARIES})
+if(WITH_OPENCL AND OpenCL_FOUND)
+  add_executable(GpuVsCpuMiningHashTests gpu_vs_cpu_mining_hash.cpp)
+endif()
+
+target_link_libraries(CoreTests
+  -Wl,--start-group
+  TestGenerator CryptoNoteCore Blockchain Storage
+  -Wl,--end-group
+  Serialization System Logging Common crypto BlockchainExplorer ${Boost_LIBRARIES})
+target_link_libraries(IntegrationTests
+  -Wl,--start-group
+  IntegrationTestLibrary Wallet NodeRpcProxy InProcessNode P2P Rpc HTTP Transfers
+  CryptoNoteCore Blockchain Storage
+  -Wl,--end-group
+  Serialization System Logging Common crypto BlockchainExplorer gtest libminiupnpc-static ${Boost_LIBRARIES})
+# pow/CryptoNoteCore are linked again via INTERFACE deps; Blockchain must follow.
+target_link_libraries(IntegrationTests Blockchain Storage)
+target_link_libraries(NodeRpcProxyTests NodeRpcProxy CryptoNoteCore Rpc HTTP Serialization System Logging Common crypto ${Boost_LIBRARIES})
+target_link_libraries(PerformanceTests
+  -Wl,--start-group
+  CryptoNoteCore Blockchain Storage
+  -Wl,--end-group
+  Serialization Logging Common crypto ${Boost_LIBRARIES})
 target_link_libraries(SystemTests System gtest_main)
 if (MSVC)
   target_link_libraries(SystemTests ws2_32)
   target_link_libraries(NodeRpcProxyTests ws2_32)
   target_link_libraries(CoreTests ws2_32)
 endif ()
-target_link_libraries(TransfersTests IntegrationTestLibrary Wallet gtest_main InProcessNode NodeRpcProxy P2P Rpc Http BlockchainExplorer CryptoNoteCore Serialization System Logging Transfers Common crypto libminiupnpc-static ${Boost_LIBRARIES})
-target_link_libraries(UnitTests TestGenerator PaymentGate Wallet NodeRpcProxy InProcessNode P2P Rpc Http Transfers Serialization System CryptoNoteCore Logging Common crypto BlockchainExplorer gtest ${Boost_LIBRARIES})
+target_link_libraries(TransfersTests IntegrationTestLibrary Wallet gtest_main InProcessNode NodeRpcProxy P2P Rpc HTTP BlockchainExplorer CryptoNoteCore Serialization System Logging Transfers Common crypto libminiupnpc-static ${Boost_LIBRARIES})
+target_link_libraries(UnitTests
+  -Wl,--start-group
+  TestGenerator PaymentGate Wallet NodeRpcProxy InProcessNode P2P Rpc HTTP Transfers
+  CryptoNoteCore Blockchain Storage
+  -Wl,--end-group
+  Serialization System Logging Common crypto BlockchainExplorer gtest ${Boost_LIBRARIES})
 
 target_link_libraries(DifficultyTests CryptoNoteCore Serialization crypto Logging Common ${Boost_LIBRARIES})
 target_link_libraries(HashTargetTests CryptoNoteCore crypto)
 target_link_libraries(HashTests crypto)
+target_link_libraries(PowGpuEquivalenceTests crypto pow CryptoNoteCore)
+target_link_libraries(PowGpuMineEquivalenceTests pow CryptoNoteCore ${Boost_LIBRARIES})
 
+if(WITH_OPENCL AND OpenCL_FOUND)
+  target_link_libraries(GpuVsCpuMiningHashTests
+    -Wl,--start-group
+    pow CryptoNoteCore ${Boost_LIBRARIES}
+    -Wl,--end-group)
+endif()
 
-add_custom_target(tests DEPENDS NodeRpcProxyTests PerformanceTests SystemTests UnitTests DifficultyTests HashTargetTests)
+add_custom_target(tests DEPENDS NodeRpcProxyTests PerformanceTests SystemTests UnitTests DifficultyTests HashTargetTests PowGpuEquivalenceTests PowGpuMineEquivalenceTests)
+
+if(WITH_OPENCL AND OpenCL_FOUND)
+  add_dependencies(tests GpuVsCpuMiningHashTests)
+endif()
 
 set_property(TARGET
   tests
@@ -87,6 +132,9 @@ set_property(TARGET UnitTests PROPERTY OUTPUT_NAME "unit_tests")
 set_property(TARGET DifficultyTests PROPERTY OUTPUT_NAME "difficulty_tests")
 set_property(TARGET HashTargetTests PROPERTY OUTPUT_NAME "hash_target_tests")
 set_property(TARGET HashTests PROPERTY OUTPUT_NAME "hash_tests")
+if(WITH_OPENCL AND OpenCL_FOUND)
+  set_property(TARGET GpuVsCpuMiningHashTests PROPERTY OUTPUT_NAME "gpu_vs_cpu_mining_hash_tests")
+endif()
 
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR APPLE AND NOT ANDROID)
@@ -116,3 +164,5 @@ endforeach(hash)
 if(MINGW AND STATIC)
   set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive")
 endif()
+
+add_subdirectory(NewOutputTests)

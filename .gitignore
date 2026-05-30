@@ -3,6 +3,7 @@
 *.ycm_extra_conf.pyc
 
 build/
+build*/
 tags/
 Release/
 Debug/
@@ -24,5 +25,7 @@ compile_commands.json
 *.bin
 *.json
 cmake-build*
+
+external/FTXUI
 
 .cursorrules

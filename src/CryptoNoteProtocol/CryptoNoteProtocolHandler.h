@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -100,8 +100,7 @@ namespace cn
     void recalculateMaxObservedHeight(const CryptoNoteConnectionContext& context);
     int processObjects(CryptoNoteConnectionContext& context, const std::vector<parsed_block_entry>& blocks);
     logging::LoggerRef logger;
-
-  private:
+ 
     int doPushLiteBlock(NOTIFY_NEW_LITE_BLOCK::request block, CryptoNoteConnectionContext &context, std::vector<BinaryArray> missingTxs);
 
     platform_system::Dispatcher& m_dispatcher;
@@ -111,6 +110,8 @@ namespace cn
     p2p_endpoint_stub m_p2p_stub;
     IP2pEndpoint* m_p2p;
     std::atomic<bool> m_synchronized;
+    /** Suppress repeated INFO "Synchronization started" for each new peer during one catch-up. */
+    std::atomic<bool> m_catchupStartAnnounced{false};
     std::atomic<bool> m_stop;
     std::recursive_mutex m_sync_lock;    
 

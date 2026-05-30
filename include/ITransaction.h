@@ -19,7 +19,17 @@ namespace cn {
 namespace transaction_types {
   
   enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating };
-  enum class OutputType : uint8_t { Invalid, Key, Multisignature };
+
+  enum class OutputType : uint8_t
+  {
+    Invalid,
+    Key,
+    Multisignature,
+    StandardPayment,
+    MultisigPayment,
+    DomainRegistration,
+    DomainDeletion
+  };
 
   struct GlobalOutput {
     crypto::PublicKey targetKey;
@@ -113,6 +123,7 @@ public:
   virtual size_t addOutput(uint64_t amount, const std::vector<AccountPublicAddress>& to, uint32_t requiredSignatures, uint32_t term = 0) = 0;
   virtual size_t addOutput(uint64_t amount, const KeyOutput& out) = 0;
   virtual size_t addOutput(uint64_t amount, const MultisignatureOutput& out) = 0;
+  virtual size_t addOutput(uint64_t amount, const StandardPaymentOutput &out) = 0;
 
   // transaction info
   virtual void setTransactionSecretKey(const crypto::SecretKey& key) = 0;

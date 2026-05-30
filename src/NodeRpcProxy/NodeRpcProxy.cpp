@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -52,14 +52,37 @@ std::error_code interpretResponseStatus(const std::string& status) {
 
 }
 
-NodeRpcProxy::NodeRpcProxy(const std::string& nodeHost, unsigned short nodePort) :
-  m_nodeHost(nodeHost),
-  m_nodePort(nodePort),
-  m_rpcTimeout(10000),
-  m_pullInterval(5000),
-  m_lastLocalBlockTimestamp(0),
-  m_connected(true) {
-    resetInternalState();
+NodeRpcProxy::NodeRpcProxy(const std::string &nodeHost, unsigned short nodePort)
+    : m_nodeHost(nodeHost),
+      m_nodePort(nodePort),
+      m_rpcTimeout(10000),
+      m_pullInterval(5000),
+      m_lastLocalBlockTimestamp(0),
+      m_connected(true),
+      m_ownsDispatcher(true),
+      m_ownedDispatcher(new platform_system::Dispatcher()),
+      m_externalDispatcher(m_ownedDispatcher.get()),
+      m_loggerPtr(nullptr)
+{
+  resetInternalState();
+}
+
+NodeRpcProxy::NodeRpcProxy(platform_system::Dispatcher &dispatcher,
+                           const std::string &nodeHost,
+                           unsigned short nodePort,
+                           logging::ILogger &logger)
+    : m_nodeHost(nodeHost),
+      m_nodePort(nodePort),
+      m_rpcTimeout(10000),
+      m_pullInterval(5000),
+      m_lastLocalBlockTimestamp(0),
+      m_connected(true),
+      m_ownsDispatcher(false),
+      m_ownedDispatcher(nullptr),
+      m_externalDispatcher(&dispatcher),
+      m_loggerPtr(&logger)
+{
+  resetInternalState();
 }
 
 NodeRpcProxy::~NodeRpcProxy() {
@@ -119,15 +142,16 @@ bool NodeRpcProxy::shutdown() {
   return true;
 }
 
-void NodeRpcProxy::workerThread(const INode::Callback& initialized_callback) {
-  try {
-    Dispatcher dispatcher;
-    m_dispatcher = &dispatcher;
-    ContextGroup contextGroup(dispatcher);
+void NodeRpcProxy::workerThread(const INode::Callback &initialized_callback)
+{
+  try
+  {
+    m_dispatcher = m_externalDispatcher;
+    ContextGroup contextGroup(*m_externalDispatcher);
     m_context_group = &contextGroup;
-    HttpClient httpClient(dispatcher, m_nodeHost, m_nodePort);
+    HttpClient httpClient(*m_externalDispatcher, m_nodeHost, m_nodePort);
     m_httpClient = &httpClient;
-    Event httpEvent(dispatcher);
+    Event httpEvent(*m_externalDispatcher);
     m_httpEvent = &httpEvent;
     m_httpEvent->set();
 
@@ -140,24 +164,48 @@ void NodeRpcProxy::workerThread(const INode::Callback& initialized_callback) {
 
     initialized_callback(std::error_code());
 
-    contextGroup.spawn([this]() {
+    contextGroup.spawn([this]()
+                       {
       Timer pullTimer(*m_dispatcher);
       while (!m_stop) {
         updateNodeStatus();
         if (!m_stop) {
           pullTimer.sleep(std::chrono::milliseconds(m_pullInterval));
         }
-      }
-    });
+      } });
 
     contextGroup.wait();
-    // Make sure all remote spawns are executed
     m_dispatcher->yield();
-  } catch (std::exception& e) {
-    // TODO Make this pass through file log
-    std::cout << "Exception while attempting to make a worker thread: " << e.what();
+  }
+  catch (std::exception &e)
+  {
+    // Log if we have a logger, otherwise fall back to stdout (legacy path)
+    if (m_loggerPtr)
+    {
+      logging::LoggerRef log(*m_loggerPtr, "NodeRpcProxy");
+      log(logging::ERROR) << "Worker thread exception: " << e.what();
+    }
+    else
+    {
+      std::cout << "Exception in NodeRpcProxy worker thread: " << e.what() << std::endl;
+    }
+
+    // Unblock any thread waiting on init
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      if (m_state == STATE_INITIALIZING)
+      {
+        m_state = STATE_NOT_INITIALIZED;
+        m_cv_initialized.notify_all();
+      }
+    }
+
+    initialized_callback(make_error_code(error::CONNECT_ERROR));
   }
 
+  // We never own m_dispatcher directly — clear the pointer but
+  // don't free it. m_ownedDispatcher's destructor handles cleanup
+  // for the legacy path.
   m_dispatcher = nullptr;
   m_context_group = nullptr;
   m_httpClient = nullptr;
@@ -740,6 +788,39 @@ std::error_code NodeRpcProxy::jsonRpcCommand(const std::string& method, const Re
   }
 
   return ec;
+}
+std::vector<crypto::Hash> NodeRpcProxy::getPoolTransactions()
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::vector<crypto::Hash> result;
+
+  // Use existing pool changes method to get current mempool
+  std::vector<crypto::Hash> knownTxs; // empty = get all
+  crypto::Hash tailBlock = m_lastKnowHash;
+
+  bool isBcActual = false;
+  std::vector<std::unique_ptr<ITransactionReader>> addedTxs;
+  std::vector<crypto::Hash> deletedTxsIds;
+
+  std::error_code ec = doGetPoolSymmetricDifference(std::move(knownTxs), tailBlock, isBcActual, addedTxs, deletedTxsIds);
+
+  if (!ec && !addedTxs.empty())
+  {
+    result.reserve(addedTxs.size());
+    for (const auto &tx : addedTxs)
+    {
+      result.push_back(tx->getTransactionHash());
+    }
+  }
+
+  return result;
+}
+
+bool NodeRpcProxy::getTransactionSync(const crypto::Hash &txHash, cn::Transaction &tx)
+{
+  std::error_code ec = doGetTransaction(txHash, tx);
+  return !ec;
 }
 
 }

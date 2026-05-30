@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -14,7 +14,10 @@
 #include <thread>
 #include <unordered_set>
 #include <future>
+#include <memory>
 
+#include "Logging/ILogger.h"
+#include "Logging/LoggerRef.h"
 #include "Common/ObserverManager.h"
 #include "INode.h"
 
@@ -64,7 +67,13 @@ private:
 
 class NodeRpcProxy : public cn::INode {
 public:
-  NodeRpcProxy(const std::string& nodeHost, unsigned short nodePort);
+  NodeRpcProxy(const std::string &nodeHost, unsigned short nodePort);
+
+  NodeRpcProxy(platform_system::Dispatcher &dispatcher,
+               const std::string &nodeHost,
+               unsigned short nodePort,
+               logging::ILogger &logger);
+
   ~NodeRpcProxy() override;
 
   bool addObserver(cn::INodeObserver* observer) override;
@@ -99,6 +108,10 @@ public:
   void getTransactionsByPaymentId(const crypto::Hash& paymentId, std::vector<TransactionDetails>& transactions, const Callback& callback) override;
   void getPoolTransactions(uint64_t timestampBegin, uint64_t timestampEnd, uint32_t transactionsNumberLimit, std::vector<TransactionDetails>& transactions, uint64_t& transactionsNumberWithinTimestamps, const Callback& callback) override;
   void isSynchronized(bool& syncStatus, const Callback& callback) override;
+
+  // Sync version
+  virtual std::vector<crypto::Hash> getPoolTransactions() override;
+  bool getTransactionSync(const crypto::Hash &txHash, cn::Transaction &tx) override;
 
   unsigned int rpcTimeout() const { return m_rpcTimeout; }
   void rpcTimeout(unsigned int val) { m_rpcTimeout = val; }
@@ -157,7 +170,17 @@ private:
   const unsigned short m_nodePort;
   unsigned int m_rpcTimeout;
   HttpClient* m_httpClient = nullptr;
-  platform_system::Event* m_httpEvent = nullptr;
+  platform_system::Event *m_httpEvent = nullptr;
+
+
+  // Dispatcher ownership
+  bool m_ownsDispatcher = false;
+  std::unique_ptr<platform_system::Dispatcher> m_ownedDispatcher;
+  platform_system::Dispatcher *m_externalDispatcher = nullptr;
+
+  // Logger (only populated when using the four-arg ctor)
+  // Use a pointer so it's optional
+  logging::ILogger *m_loggerPtr = nullptr;
 
   uint64_t m_pullInterval;
 

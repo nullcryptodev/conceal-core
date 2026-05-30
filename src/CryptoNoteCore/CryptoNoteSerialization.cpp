@@ -1,11 +1,12 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "CryptoNoteSerialization.h"
+#include "NewOutputSerialization.h"
 
 #include <algorithm>
 #include <sstream>
@@ -60,6 +61,11 @@ struct BinaryVariantTagGetter : boost::static_visitor<uint8_t>
   uint8_t operator()(const cn::MultisignatureOutput &) const { return 0x3; }
   uint8_t operator()(const cn::Transaction &) const { return 0xcc; }
   uint8_t operator()(const cn::Block &) const { return 0xbb; }
+
+  uint8_t operator()(const cn::StandardPaymentOutput &) const { return 0x04; }
+  uint8_t operator()(const cn::MultisigPaymentOutput &) const { return 0x05; }
+  uint8_t operator()(const cn::DomainRegistrationOutput &) const { return 0x06; }
+  uint8_t operator()(const cn::DomainDeletionOutput &) const { return 0x07; }
 };
 
 struct VariantSerializer : boost::static_visitor<> {
@@ -107,6 +113,34 @@ void getVariantValue(cn::ISerializer& serializer, uint8_t tag, cn::TransactionOu
   }
   case 0x3: {
     cn::MultisignatureOutput v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x04:
+  {
+    cn::StandardPaymentOutput v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x05:
+  {
+    cn::MultisigPaymentOutput v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x06:
+  {
+    cn::DomainRegistrationOutput v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x07:
+  {
+    cn::DomainDeletionOutput v;
     serializer(v, "data");
     out = v;
     break;
@@ -183,7 +217,7 @@ namespace cn {
 void serialize(TransactionPrefix& txP, ISerializer& serializer) {
   serializer(txP.version, "version");
 
-  if (TRANSACTION_VERSION_2 < txP.version) {
+  if (TRANSACTION_VERSION_3 < txP.version) {
     throw serialization_error("Wrong transaction version");
   }
 

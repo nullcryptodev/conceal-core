@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -1053,6 +1053,21 @@ void InProcessNode::isSynchronized(bool& syncStatus, const Callback& callback) {
 void InProcessNode::isSynchronizedAsync(bool& syncStatus, const Callback& callback) {
   syncStatus = protocol.isSynchronized();
   callback(std::error_code());
+}
+
+std::vector<crypto::Hash> InProcessNode::getPoolTransactions()
+{
+  std::vector<crypto::Hash> result;
+  const auto pool = core.getPoolTransactions();
+  result.reserve(pool.size());
+  for (const Transaction& tx : pool)
+    result.push_back(getObjectHash(tx));
+  return result;
+}
+
+bool InProcessNode::getTransactionSync(const crypto::Hash& txHash, cn::Transaction& tx)
+{
+  return !doGetTransaction(txHash, tx);
 }
 
 } //namespace cn

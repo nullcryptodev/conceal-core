@@ -163,6 +163,15 @@ elseif(NOT MSVC)
 endif()
 
 # option(BUILD_TESTS "Build tests." ON)
+option(WITH_OPENCL "Enable OpenCL CN-GPU PoW verification offload" ON)
+if(WITH_OPENCL)
+  find_package(OpenCL)
+  if(NOT OpenCL_FOUND)
+    message(STATUS "OpenCL not found; building without GPU PoW offload")
+  endif()
+endif()
+
+option(BUILD_MIGRATION_GUI "Build wxWidgets migration GUI (conceald-migrate-gui)" OFF)
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

@@ -5,7 +5,7 @@
 
 #include "gtest/gtest.h"
 
-#include "CryptoNoteCore/Checkpoints.h"
+#include "Blockchain/Checkpoints.h"
 #include <Logging/LoggerGroup.h>
 
 using namespace cn;

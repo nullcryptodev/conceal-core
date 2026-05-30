@@ -87,6 +87,10 @@ public:
   virtual void getTransactionsByPaymentId(const crypto::Hash& paymentId, std::vector<TransactionDetails>& transactions, const Callback& callback) = 0;
   virtual void getPoolTransactions(uint64_t timestampBegin, uint64_t timestampEnd, uint32_t transactionsNumberLimit, std::vector<TransactionDetails>& transactions, uint64_t& transactionsNumberWithinTimestamps, const Callback& callback) = 0;
   virtual void isSynchronized(bool& syncStatus, const Callback& callback) = 0;
+
+  // Sync version (for SyncMonitor)
+  virtual std::vector<crypto::Hash> getPoolTransactions() = 0;
+  virtual bool getTransactionSync(const crypto::Hash &txHash, cn::Transaction &tx) = 0;
 };
 
 }

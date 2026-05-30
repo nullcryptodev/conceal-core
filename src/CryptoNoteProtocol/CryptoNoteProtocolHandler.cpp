@@ -2,13 +2,15 @@
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
 // Copyright (c) 2016-2020 The Karbo developers
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "CryptoNoteProtocolHandler.h"
 
+#include "../pow/pow_service.hpp"
+#include <algorithm>
 #include <future>
 #include <boost/scope_exit.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -18,6 +20,7 @@
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/Currency.h"
+#include "Blockchain/CheckpointList.h"
 #include "CryptoNoteCore/VerificationContext.h"
 #include "P2p/LevinProtocol.h"
 #include <cstdint>  // for UINT64_MAX
@@ -194,15 +197,28 @@ bool CryptoNoteProtocolHandler::process_payload_sync_data(const CORE_SYNC_DATA &
   }
   else
   {
-    int64_t diff = static_cast<int64_t>(hshd.current_height) - static_cast<int64_t>(get_current_blockchain_height());
+    const uint32_t localHeight = get_current_blockchain_height();
+    int64_t diff = static_cast<int64_t>(hshd.current_height) - static_cast<int64_t>(localHeight);
+    const bool behindPeer = diff >= 0;
 
-    logger(diff >= 0 ? (is_inital ? logging::INFO : DEBUGGING) : logging::TRACE)  << context << "Unknown top block: " << get_current_blockchain_height() << " -> " << hshd.current_height
-                                                                                          << std::endl
-                                                                                          
-                                                                                          << "Synchronization started";
+    // Each new outgoing peer handshakes while we still lack its tip — not a new sync session.
+    const bool firstCatchupAnnounce =
+        behindPeer && is_inital && !m_catchupStartAnnounced.exchange(true, std::memory_order_relaxed);
+
+    if (firstCatchupAnnounce)
+    {
+      logger(logging::INFO) << "Synchronization started (local height " << localHeight << ", network ~"
+                            << hshd.current_height << ") via " << context;
+    }
+    else
+    {
+      logger(behindPeer ? logging::DEBUGGING : logging::TRACE)
+          << context << "Unknown top block: " << localHeight << " -> " << hshd.current_height
+          << (behindPeer && is_inital ? " (peer joining catch-up)" : "");
+    }
 
     logger(DEBUGGING) << "Remote top block height: " << hshd.current_height << ", id: " << hshd.top_id;
-    //let the socket to send response to handshake, but request callback, to let send request data after response
+    // let the socket to send response to handshake, but request callback, to let send request data after response
     logger(logging::TRACE) << context << "requesting synchronization";
     context.m_state = CryptoNoteConnectionContext::state_sync_required;
   }
@@ -214,6 +230,17 @@ bool CryptoNoteProtocolHandler::process_payload_sync_data(const CORE_SYNC_DATA &
   {
     m_peersCount++;
     m_observerManager.notify(&ICryptoNoteProtocolObserver::peerCountUpdated, m_peersCount.load());
+  }
+
+  // Request checkpoints from peer after handshake
+  if (context.m_state == CryptoNoteConnectionContext::state_normal ||
+      context.m_state == CryptoNoteConnectionContext::state_sync_required ||
+      context.m_state == CryptoNoteConnectionContext::state_pool_sync_required)
+  {
+    NOTIFY_REQUEST_CHECKPOINT_LIST::request cpReq;
+    cpReq.startHeight = 0;
+    cpReq.endHeight = 0; // 0 means all available
+    post_notify<NOTIFY_REQUEST_CHECKPOINT_LIST>(*m_p2p, cpReq, context);
   }
 
   return true;
@@ -290,13 +317,13 @@ int CryptoNoteProtocolHandler::handle_notify_new_block(int command, NOTIFY_NEW_B
     return 1;
   }
 
+  size_t txCount = 0; // ADD THIS
+
   for (auto tx_blob_it = arg.b.txs.begin(); tx_blob_it != arg.b.txs.end(); tx_blob_it++)
   {
     cn::tx_verification_context tvc = boost::value_initialized<decltype(tvc)>();
 
     auto transactionBinary = asBinaryArray(*tx_blob_it);
-    //crypto::Hash transactionHash = crypto::cn_fast_hash(transactionBinary.data(), transactionBinary.size());
-    //logger(DEBUGGING) << "transaction " << transactionHash << " came in NOTIFY_NEW_BLOCK";
 
     m_core.handle_incoming_tx(transactionBinary, tvc, true);
     if (tvc.m_verification_failed)
@@ -304,6 +331,12 @@ int CryptoNoteProtocolHandler::handle_notify_new_block(int command, NOTIFY_NEW_B
       logger(logging::INFO) << context << "Block verification failed: transaction verification failed, dropping connection";
       m_p2p->drop_connection(context, true);
       return 1;
+    }
+
+    // ADD THIS - yield every 100 transactions
+    if (++txCount % 100 == 0)
+    {
+      m_dispatcher.yield();
     }
   }
 
@@ -318,10 +351,7 @@ int CryptoNoteProtocolHandler::handle_notify_new_block(int command, NOTIFY_NEW_B
   if (bvc.m_added_to_main_chain)
   {
     ++arg.hop;
-    //TODO: Add here announce protocol usage
-    //relay_post_notify<NOTIFY_NEW_BLOCK>(*m_p2p, arg, &context.m_connection_id);
     relay_block(arg);
-    // relay_block(arg, context);
 
     if (bvc.m_switched_to_alt_chain)
     {
@@ -352,7 +382,7 @@ int CryptoNoteProtocolHandler::handle_notify_new_transactions(int command, NOTIF
     logger(logging::TRACE) << context
                            << " Pending lite block detected, handling request as missing lite block transactions response";
     std::vector<BinaryArray> _txs;
-    for (const auto& tx : arg.txs)
+    for (const auto &tx : arg.txs)
     {
       _txs.push_back(asBinaryArray(tx));
     }
@@ -360,6 +390,8 @@ int CryptoNoteProtocolHandler::handle_notify_new_transactions(int command, NOTIF
   }
   else
   {
+    size_t txCount = 0;
+
     for (auto tx_blob_it = arg.txs.begin(); tx_blob_it != arg.txs.end();)
     {
       auto transactionBinary = asBinaryArray(*tx_blob_it);
@@ -380,11 +412,17 @@ int CryptoNoteProtocolHandler::handle_notify_new_transactions(int command, NOTIF
       {
         tx_blob_it = arg.txs.erase(tx_blob_it);
       }
+
+      // yield every 100 transactions to keep connections alive
+      if (++txCount % 100 == 0)
+      {
+        m_dispatcher.yield();
+      }
     }
 
     if (arg.txs.size())
     {
-      //TODO: add announce usage here
+      // TODO: add announce usage here
       relay_post_notify<NOTIFY_NEW_TRANSACTIONS>(*m_p2p, arg, &context.m_connection_id);
     }
   }
@@ -398,8 +436,7 @@ int CryptoNoteProtocolHandler::handle_request_get_objects(int command, NOTIFY_RE
   size_t maxObjects = m_maxObjectCount.load();
   const size_t totalObjects = arg.blocks.size() + arg.txs.size();
 
-  logger(INFO) << "DEBUG: Request for " << totalObjects << " objects (limit: " << maxObjects << ")";
-
+  logger(DEBUGGING) << "Request for " << totalObjects << " objects (limit: " << maxObjects << ")";
 
   if (totalObjects > maxObjects)
   {
@@ -498,9 +535,9 @@ int CryptoNoteProtocolHandler::handle_response_get_objects(int command, NOTIFY_R
   }
 
   if (context.m_requested_objects.size()) {
-    logger(logging::ERROR, logging::BRIGHT_RED) << context <<
-      "returned not all requested objects (context.m_requested_objects.size()="
-      << context.m_requested_objects.size() << "), dropping connection";
+    logger(INFO) << context << "disconnected during sync (received "
+                 << context.m_requested_objects.size() << " of requested objects), switching to another peer";
+
     context.m_state = CryptoNoteConnectionContext::state_shutdown;
     return 1;
   }
@@ -550,32 +587,71 @@ int CryptoNoteProtocolHandler::handle_response_get_objects(int command, NOTIFY_R
   return 1;
 }
 
-int CryptoNoteProtocolHandler::processObjects(CryptoNoteConnectionContext& context, const std::vector<parsed_block_entry>& blocks) {
+int CryptoNoteProtocolHandler::processObjects(CryptoNoteConnectionContext &context, const std::vector<parsed_block_entry> &blocks)
+{
 
-  for (const parsed_block_entry& block_entry : blocks) {
+  // pushBlock PoW uses getCurrentBlockchainHeight() == blocksSize() == top index + 1.
+  const uint32_t batchBaseHeight = get_current_blockchain_height() + 1;
+  cn::PowService::instance().prefetch().setValidatedTip(get_current_blockchain_height());
+
+  if (!blocks.empty() && cn::PowService::instance().gpuPrefetchEnabled())
+  {
+    const uint32_t localHeight = get_current_blockchain_height();
+    const uint32_t catchupGap =
+        context.m_remote_blockchain_height > localHeight ? context.m_remote_blockchain_height - localHeight : 0;
+    const size_t effectiveBacklog = std::max(blocks.size(), static_cast<size_t>(catchupGap));
+    cn::PowService::instance().updateSyncContext(blocks.size(), catchupGap);
+
+    std::vector<Block> prefetchBlocks;
+    std::vector<uint32_t> prefetchHeights;
+    prefetchBlocks.reserve(blocks.size());
+    prefetchHeights.reserve(blocks.size());
+    for (size_t i = 0; i < blocks.size(); ++i)
+    {
+      if (blocks[i].block.majorVersion < 8)
+        continue;
+      prefetchBlocks.push_back(blocks[i].block);
+      prefetchHeights.push_back(batchBaseHeight + static_cast<uint32_t>(i));
+    }
+    if (!prefetchBlocks.empty())
+      cn::PowService::instance().prefetch().enqueueUpcoming(prefetchBlocks.data(), prefetchHeights.data(),
+                                                            prefetchBlocks.size(), 0, effectiveBacklog);
+  }
+
+  for (size_t bi = 0; bi < blocks.size(); ++bi) {
+    const parsed_block_entry& block_entry = blocks[bi];
     if (m_stop) {
       break;
     }
 
+    const size_t batchRemainder = blocks.size() - bi - 1;
+    const uint32_t localHeight = get_current_blockchain_height();
+    const uint32_t catchupGap =
+        context.m_remote_blockchain_height > localHeight ? context.m_remote_blockchain_height - localHeight : 0;
+    cn::PowService::instance().updateSyncContext(batchRemainder, catchupGap);
+
     //process transactions
     for (size_t i = 0; i < block_entry.txs.size(); ++i) {
+
       auto transactionBinary = block_entry.txs[i];
       crypto::Hash transactionHash = crypto::cn_fast_hash(transactionBinary.data(), transactionBinary.size());
       logger(DEBUGGING) << "transaction " << transactionHash << " came in processObjects";
 
       // check if tx hashes match
-      if (transactionHash != block_entry.block.transactionHashes[i]) {
+      if (transactionHash != block_entry.block.transactionHashes[i])
+      {
         logger(DEBUGGING) << context << "transaction mismatch on NOTIFY_RESPONSE_GET_OBJECTS, \r\ntx_id = "
-          << common::podToHex(transactionHash) << ", dropping connection";
+                          << common::podToHex(transactionHash) << ", dropping connection";
         context.m_state = CryptoNoteConnectionContext::state_shutdown;
         return 1;
       }
 
       tx_verification_context tvc = boost::value_initialized<decltype(tvc)>();
       m_core.handle_incoming_tx(transactionBinary, tvc, true);
-      if (tvc.m_verification_failed) {
+      if (tvc.m_verification_failed)
+      {
         logger(DEBUGGING) << context << "transaction verification failed on NOTIFY_RESPONSE_GET_OBJECTS, \r\ntx_id = "
-          << common::podToHex(transactionHash) << ", dropping connection";
+                          << common::podToHex(transactionHash) << ", dropping connection";
         context.m_state = CryptoNoteConnectionContext::state_shutdown;
         return 1;
       }
@@ -585,27 +661,49 @@ int CryptoNoteProtocolHandler::processObjects(CryptoNoteConnectionContext& conte
     block_verification_context bvc = boost::value_initialized<block_verification_context>();
     m_core.handle_incoming_block(block_entry.block, bvc, false, false);
 
-    if (bvc.m_verification_failed) {
+    if (bvc.m_verification_failed)
+    {
       logger(DEBUGGING) << context << "Block verification failed, dropping connection";
       context.m_state = CryptoNoteConnectionContext::state_shutdown;
       return 1;
-    } else if (bvc.m_marked_as_orphaned) {
+    }
+    else if (bvc.m_marked_as_orphaned)
+    {
       logger(logging::INFO) << context << "Block received at sync phase was marked as orphaned, dropping connection";
       context.m_state = CryptoNoteConnectionContext::state_shutdown;
       return 1;
-    } else if (bvc.m_already_exists) {
+    }
+    else if (bvc.m_already_exists)
+    {
       logger(DEBUGGING) << context << "Block already exists, switching to idle state";
       context.m_state = CryptoNoteConnectionContext::state_idle;
       context.m_needed_objects.clear();
       context.m_requested_objects.clear();
       return 1;
+    } else if (bvc.m_added_to_main_chain && bi + 1 < blocks.size() &&
+               cn::PowService::instance().gpuPrefetchEnabled())
+    {
+      std::vector<Block> tail;
+      std::vector<uint32_t> tailHeights;
+      const size_t remaining = blocks.size() - (bi + 1);
+      tail.reserve(remaining);
+      tailHeights.reserve(remaining);
+      uint32_t nextHeight = get_current_blockchain_height() + 1;
+      for (size_t t = 0; t < remaining; ++t)
+      {
+        const size_t j = bi + 1 + t;
+        tail.push_back(blocks[j].block);
+        tailHeights.push_back(nextHeight + static_cast<uint32_t>(t));
+      }
+      const size_t effectiveBacklog = std::max(remaining, static_cast<size_t>(catchupGap));
+      cn::PowService::instance().prefetch().enqueueUpcoming(tail.data(), tailHeights.data(), tail.size(), 0,
+                                                            effectiveBacklog);
     }
 
-    m_dispatcher.yield();
+    m_dispatcher.yield(); // let other fibers run (timers, keepalives)
   }
 
   return 0;
-
 }
 
 bool CryptoNoteProtocolHandler::on_idle()
@@ -700,6 +798,7 @@ bool CryptoNoteProtocolHandler::on_connection_synchronized()
   bool val_expected = false;
   if (m_synchronized.compare_exchange_strong(val_expected, true))
   {
+    m_catchupStartAnnounced.store(false, std::memory_order_relaxed);
     logger(logging::INFO) << ENDL << "********************************************************************************" << ENDL
                           << "You are now synchronized with the Conceal network." << ENDL
                           << "Please note, that the blockchain will be saved only after you quit the daemon" << ENDL

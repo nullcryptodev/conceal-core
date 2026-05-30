@@ -20,7 +20,7 @@
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/Core.h"
 #include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/UpgradeDetector.h"
+#include "Blockchain/UpgradeDetector.h"
 
 //#include "AccountBoostSerialization.h"
 //#include "cryptonote_boost_serialization.h"

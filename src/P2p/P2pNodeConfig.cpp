@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -115,6 +115,26 @@ void P2pNodeConfig::setPeerListConnectRange(size_t range) {
 
 void P2pNodeConfig::setPeerListGetTryCount(size_t count) {
   peerListGetTryCount = count;
+}
+
+size_t P2pNodeConfig::getMinOutgoingConnections() const
+{
+  return m_minOutgoingConnections;
+}
+
+size_t P2pNodeConfig::getMaxOutgoingConnections() const
+{
+  return m_maxOutgoingConnections;
+}
+
+void P2pNodeConfig::setMinOutgoingConnections(size_t count)
+{
+  m_minOutgoingConnections = count;
+}
+
+void P2pNodeConfig::setMaxOutgoingConnections(size_t count)
+{
+  m_maxOutgoingConnections = std::max(count, m_minOutgoingConnections);
 }
 
 }

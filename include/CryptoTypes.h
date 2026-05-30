@@ -8,6 +8,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace crypto {
 
@@ -46,6 +48,43 @@ struct Signature {
 };
 
 const struct EllipticCurveScalar I = {{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+
+}
+
+namespace cn {
+
+struct TransactionOutputStandardPaymentDetails {
+  crypto::PublicKey txOutKey;
+  uint8_t viewTag;
+  uint16_t keyIndex;
+  uint8_t memoSize;
+  std::vector<uint8_t> encryptedMemo;
+};
+
+struct TransactionOutputMultisigPaymentDetails {
+  std::vector<crypto::PublicKey> keys;
+  uint8_t requiredSignatures;
+  uint32_t term;
+  uint8_t flags;
+  uint8_t viewTag;
+  uint16_t keyIndex;
+  uint8_t memoSize;
+  std::vector<uint8_t> encryptedMemo;
+};
+
+struct TransactionOutputDomainRegistrationDetails {
+  std::string domain;
+  uint8_t tier;
+  crypto::PublicKey domainPub;
+  crypto::PublicKey domainViewPub;
+  std::vector<uint8_t> encryptedAddr;
+  std::vector<uint8_t> metadata;
+};
+
+struct TransactionOutputDomainDeletionDetails {
+  std::string domain;
+  crypto::Signature sig;
+};
 
 }
 

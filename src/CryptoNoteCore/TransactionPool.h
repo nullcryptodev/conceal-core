@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -29,10 +29,10 @@
 #include "CryptoNoteCore/CryptoNoteBasicImpl.h"
 #include "CryptoNoteCore/Currency.h"
 #include "CryptoNoteCore/ITimeProvider.h"
-#include "CryptoNoteCore/ITransactionValidator.h"
+#include "Blockchain/ITransactionValidator.h"
 #include "CryptoNoteCore/ITxPoolObserver.h"
 #include "CryptoNoteCore/VerificationContext.h"
-#include "CryptoNoteCore/BlockchainIndices.h"
+#include "Blockchain/BlockchainIndices.h"
 
 #include <Logging/LoggerRef.h>
 

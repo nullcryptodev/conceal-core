@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -93,6 +93,19 @@ private:
   bool f_getMixin(const Transaction& transaction, uint64_t& mixin) const;
 
   bool fill_f_block_details_response(const crypto::Hash& hash, f_block_details_response& block);
+
+  bool on_get_merkle_proof(const COMMAND_RPC_GET_MERKLE_PROOF::request &req,
+                           COMMAND_RPC_GET_MERKLE_PROOF::response &res);
+  bool on_get_outputs_for_address(const COMMAND_RPC_GET_OUTPUTS_FOR_ADDRESS::request &req,
+                                  COMMAND_RPC_GET_OUTPUTS_FOR_ADDRESS::response &res);
+  
+  bool on_get_spv_outputs(const COMMAND_RPC_GET_SPV_OUTPUTS::request &req, COMMAND_RPC_GET_SPV_OUTPUTS::response &res);
+
+  bool on_get_filter_records(const COMMAND_RPC_GET_FILTER_RECORDS::request &req,
+                             COMMAND_RPC_GET_FILTER_RECORDS::response &res);
+
+  bool on_get_domain(const COMMAND_RPC_GET_DOMAIN::request &req,
+                     COMMAND_RPC_GET_DOMAIN::response &res);
 
   logging::LoggerRef logger;
   core& m_core;

@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -8,6 +8,8 @@
 #include "CryptoNoteFormatUtils.h"
 
 #include <set>
+#include <limits>
+
 #include <Logging/LoggerRef.h>
 #include <Common/BinaryArray.hpp>
 #include <Common/int-util.h>
@@ -336,6 +338,50 @@ bool check_outs_valid(const TransactionPrefix& tx, std::string* error) {
           return false;
         }
       }
+    }
+    else if (out.target.type() == typeid(StandardPaymentOutput))
+    {
+      const StandardPaymentOutput &standardOutput = ::boost::get<StandardPaymentOutput>(out.target);
+      if (!check_key(standardOutput.key))
+      {
+        if (error)
+        {
+          *error = "StandardPaymentOutput with invalid key";
+        }
+        return false;
+      }
+    }
+    else if (out.target.type() == typeid(MultisigPaymentOutput))
+    {
+      const MultisigPaymentOutput &multisigOutput = ::boost::get<MultisigPaymentOutput>(out.target);
+      if (multisigOutput.num_keys > multisigOutput.keys.size())
+      {
+        if (error)
+        {
+          *error = "MultisigPaymentOutput with invalid key count";
+        }
+        return false;
+      }
+      for (const PublicKey &key : multisigOutput.keys)
+      {
+        if (!check_key(key))
+        {
+          if (error)
+          {
+            *error = "MultisigPaymentOutput with invalid public key";
+          }
+          return false;
+        }
+      }
+    }
+    else if (out.target.type() == typeid(DomainRegistrationOutput))
+    {
+      // Domain registrations are valid as long as they parse correctly
+      // Serialization already validates structure
+    }
+    else if (out.target.type() == typeid(DomainDeletionOutput))
+    {
+      // Domain deletions are valid as long as they parse correctly
     } else {
       if (error) {
         *error = "Output with invalid type";
@@ -486,6 +532,39 @@ bool get_block_hashing_blob(const Block& b, BinaryArray& ba) {
   return true;
 }
 
+bool get_hashing_blob_nonce_offset(const Block& headerTemplate, size_t& offset)
+{
+  Block b0 = headerTemplate;
+  b0.nonce = 0;
+  BinaryArray blob0;
+  if (!get_block_hashing_blob(b0, blob0))
+    return false;
+
+  Block b1 = headerTemplate;
+  b1.nonce = 1;
+  BinaryArray blob1;
+  if (!get_block_hashing_blob(b1, blob1))
+    return false;
+
+  if (blob0.size() != blob1.size())
+    return false;
+
+  offset = blob0.size();
+  for (size_t i = 0; i < blob0.size(); ++i)
+  {
+    if (blob0[i] != blob1[i])
+    {
+      offset = i;
+      break;
+    }
+  }
+
+  if (offset + sizeof(uint32_t) > blob0.size())
+    return false;
+
+  return true;
+}
+
 bool get_block_hash(const Block& b, Hash& res) {
   BinaryArray ba;
   if (!get_block_hashing_blob(b, ba)) {
@@ -533,7 +612,11 @@ bool get_block_longhash(cn_context &context, const Block& b, Hash& res) {
 std::vector<uint32_t> relative_output_offsets_to_absolute(const std::vector<uint32_t>& off) {
   std::vector<uint32_t> res = off;
   for (size_t i = 1; i < res.size(); i++)
+  {
+    if (res[i] > std::numeric_limits<uint32_t>::max() - res[i - 1])
+      return {}; // overflow: corrupt offset sequence, caller treats empty as invalid
     res[i] += res[i - 1];
+  }
   return res;
 }
 

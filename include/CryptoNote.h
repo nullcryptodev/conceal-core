@@ -10,6 +10,7 @@
 #include <vector>
 #include <boost/variant.hpp>
 #include "CryptoTypes.h"
+#include "CryptoNoteCore/NewOutputTypes.h"
 
 namespace cn {
 
@@ -42,7 +43,9 @@ struct MultisignatureOutput {
 
 typedef boost::variant<BaseInput, KeyInput, MultisignatureInput> TransactionInput;
 
-typedef boost::variant<KeyOutput, MultisignatureOutput> TransactionOutputTarget;
+typedef boost::variant<KeyOutput, MultisignatureOutput,
+                       StandardPaymentOutput, MultisigPaymentOutput,
+                       DomainRegistrationOutput, DomainDeletionOutput> TransactionOutputTarget;
 
 struct TransactionOutput {
   uint64_t amount;

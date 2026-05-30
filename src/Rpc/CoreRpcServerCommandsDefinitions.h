@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -11,6 +11,8 @@
 #include "CryptoNoteCore/CryptoNoteBasic.h"
 #include "CryptoNoteCore/Difficulty.h"
 #include "crypto/hash.h"
+
+#include "Blockchain/BlockchainFilter.h"
 
 #include "Serialization/SerializationOverloads.h"
 
@@ -352,6 +354,7 @@ struct COMMAND_RPC_GET_INFO {
     uint64_t last_block_timestamp;
     uint64_t last_block_difficulty;
     std::vector<std::string> connections;
+    uint64_t upgrade_height_v9;
 
     void serialize(ISerializer &s) {
       KV_MEMBER(status)
@@ -374,7 +377,8 @@ struct COMMAND_RPC_GET_INFO {
       KV_MEMBER(last_block_reward)
       KV_MEMBER(last_block_timestamp)
       KV_MEMBER(last_block_difficulty)
-      KV_MEMBER(connections)      
+      KV_MEMBER(connections)
+      KV_MEMBER(upgrade_height_v9)
     }
   };
 };
@@ -1067,4 +1071,279 @@ struct K_COMMAND_RPC_CHECK_RESERVE_PROOF {
 	};
 };
 
+struct COMMAND_RPC_GET_MERKLE_PROOF
+{
+  struct request
+  {
+    crypto::Hash tx_hash;
+
+    void serialize(ISerializer &s)
+    {
+      s(tx_hash, "tx_hash");
+    }
+  };
+
+  struct response
+  {
+    uint32_t block_height;
+    std::string block_hash;
+    std::string merkle_root;
+    uint32_t tx_index;
+    std::vector<std::string> merkle_branch;
+    std::string status;
+
+    void serialize(ISerializer &s)
+    {
+      s(block_height, "block_height");
+      s(block_hash, "block_hash");
+      s(merkle_root, "merkle_root");
+      s(tx_index, "tx_index");
+      s(merkle_branch, "merkle_branch");
+      s(status, "status");
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_OUTPUTS_FOR_ADDRESS
+{
+  struct request
+  {
+    std::string view_pub_key; // hex-encoded public view key
+    uint32_t from_height;
+    uint32_t to_height;
+    uint32_t max_outputs = 10000; // Limit to prevent overwhelming client
+
+    void serialize(ISerializer &s)
+    {
+      s(view_pub_key, "view_pub_key");
+      s(from_height, "from_height");
+      s(to_height, "to_height");
+      if (s.type() == ISerializer::INPUT)
+      {
+        s(max_outputs, "max_outputs");
+      }
+    }
+  };
+
+  struct response
+  {
+    struct OutputEntry
+    {
+      uint32_t block_height;
+      std::string tx_hash;
+      uint64_t amount;
+      uint32_t global_output_index;
+      std::string output_public_key;
+      uint64_t timestamp;
+
+      void serialize(ISerializer &s)
+      {
+        s(block_height, "block_height");
+        s(tx_hash, "tx_hash");
+        s(amount, "amount");
+        s(global_output_index, "global_output_index");
+        s(output_public_key, "output_public_key");
+        s(timestamp, "timestamp");
+      }
+    };
+    std::vector<OutputEntry> outputs;
+    uint32_t next_from_height; // For pagination, where to continue from
+    bool has_more;             // Whether there are more outputs beyond max_outputs
+    std::string status;
+
+    void serialize(ISerializer &s)
+    {
+      s(outputs, "outputs");
+      s(next_from_height, "next_from_height");
+      s(has_more, "has_more");
+      s(status, "status");
+    }
+  };
+};
+
+struct COMMAND_RPC_EXPORT_HEADERS
+{
+  struct request
+  {
+    std::string filename;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(filename)
+    }
+  };
+
+  struct response
+  {
+    std::string status;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_SPV_OUTPUTS
+{
+  struct request
+  {
+    std::string view_key;
+    std::string spend_key;
+    uint32_t from_height = 0;
+    uint32_t to_height = 0;
+    uint32_t max_outputs = 10000;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(view_key)
+      KV_MEMBER(spend_key)
+      KV_MEMBER(from_height)
+      KV_MEMBER(to_height)
+      KV_MEMBER(max_outputs)
+    }
+  };
+
+  struct response
+  {
+    struct OutputEntry
+    {
+      uint32_t block_height;
+      std::string tx_hash;
+      uint64_t amount;
+      uint32_t output_index;
+      std::string output_public_key;
+      std::string tx_public_key;
+      uint64_t timestamp;
+      bool is_deposit;
+      uint32_t term;
+
+      void serialize(ISerializer &s)
+      {
+        KV_MEMBER(block_height)
+        KV_MEMBER(tx_hash)
+        KV_MEMBER(amount)
+        KV_MEMBER(output_index)
+        KV_MEMBER(output_public_key)
+        KV_MEMBER(tx_public_key)
+        KV_MEMBER(timestamp)
+        KV_MEMBER(is_deposit)
+        KV_MEMBER(term)
+      }
+    };
+
+    std::vector<OutputEntry> outputs;
+    uint32_t next_from_height;
+    bool has_more;
+    std::string status;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(outputs)
+      KV_MEMBER(next_from_height)
+      KV_MEMBER(has_more)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_WALLET_SNAPSHOT
+{
+  struct request
+  {
+    std::vector<std::string> tx_pub_keys; // hex-encoded tx public keys the wallet knows about
+    uint32_t wallet_height;               // wallet's last synced height (for new key discovery)
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(tx_pub_keys)
+      KV_MEMBER(wallet_height)
+    }
+  };
+
+  struct response
+  {
+    std::string snapshot; // JSON containing outputs, spent key images, new tx pub keys, current height
+    std::string status;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(snapshot)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_FILTER_RECORDS
+{
+  struct request
+  {
+    uint32_t start_height;
+    uint32_t end_height;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(start_height)
+      KV_MEMBER(end_height)
+    }
+  };
+
+  struct response
+  {
+    std::vector<BlockFilterRecord> records;
+    std::string status;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(records)
+      KV_MEMBER(status)
+    }
+  };
+};
+struct COMMAND_RPC_GET_DOMAIN
+{
+  struct request
+  {
+    std::string domain;
+    bool include_proof;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(domain)
+      KV_MEMBER(include_proof)
+    }
+  };
+
+  struct response
+  {
+    std::string domain;
+    uint8_t tier;
+    std::string domain_pub;
+    std::string domain_view_pub;
+    std::string encrypted_addr;
+    std::string metadata;
+    uint32_t registration_height;
+    uint32_t transaction_index;
+    uint32_t output_index;
+    std::string status;
+    std::string merkle_root;
+    std::vector<std::string> merkle_branch;
+
+    void serialize(ISerializer &s)
+    {
+      KV_MEMBER(domain)
+      KV_MEMBER(tier)
+      KV_MEMBER(domain_pub)
+      KV_MEMBER(domain_view_pub)
+      KV_MEMBER(encrypted_addr)
+      KV_MEMBER(metadata)
+      KV_MEMBER(registration_height)
+      KV_MEMBER(transaction_index)
+      KV_MEMBER(output_index)
+      KV_MEMBER(status)
+      KV_MEMBER(merkle_root)
+      KV_MEMBER(merkle_branch)
+    }
+  };
+};
 }

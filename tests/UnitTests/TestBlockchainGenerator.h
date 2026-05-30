@@ -11,7 +11,7 @@
 #include "CryptoNoteCore/Account.h"
 #include "CryptoNoteCore/CryptoNoteBasic.h"
 #include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/BlockchainIndices.h"
+#include "Blockchain/BlockchainIndices.h"
 #include "crypto/hash.h"
 
 #include "../TestGenerator/TestGenerator.h"

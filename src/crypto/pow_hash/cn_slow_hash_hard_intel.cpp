@@ -21,11 +21,34 @@
 
 #define CN_ADD_TARGETS_AND_HEADERS
 
+#include "../cn_gpu_inner_trace.h"
 #include "../keccak.h"
 #include "aux_hash.h"
 #include "cn_slow_hash.hpp"
 
+#include <algorithm>
+#include <cstring>
+
+#include <cstdio>
+
 #ifdef HAS_INTEL_HW
+
+namespace
+{
+void traceM128i(const char* label, __m128i v)
+{
+  alignas(16) int32_t a[4];
+  _mm_storeu_si128(reinterpret_cast<__m128i*>(a), v);
+  std::fprintf(stderr, "[cn-gpu-trace] %s %d %d %d %d\n", label, a[0], a[1], a[2], a[3]);
+}
+
+void traceM128f(const char* label, __m128 v)
+{
+  alignas(16) float a[4];
+  _mm_storeu_ps(a, v);
+  std::fprintf(stderr, "[cn-gpu-trace] %s %.9g %.9g %.9g %.9g\n", label, a[0], a[1], a[2], a[3]);
+}
+} // namespace
 // sl_xor(a1 a2 a3 a4) = a1 (a2^a1) (a3^a2^a1) (a4^a3^a2^a1)
 inline __m128i sl_xor(__m128i tmp1)
 {
@@ -473,8 +496,10 @@ inline void single_comupte_wrap(__m128 n0, __m128 n1, __m128 n2, __m128 n3, floa
 }
 
 template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
-void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3()
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3_iters(size_t iters)
 {
+	if(iters > ITER)
+		iters = ITER;
 	uint32_t s = spad.as_dword(0) >> 8;
 	cn_sptr idx0 = scratchpad_ptr(s, 0);
 	cn_sptr idx1 = scratchpad_ptr(s, 1);
@@ -482,17 +507,30 @@ void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3()
 	cn_sptr idx3 = scratchpad_ptr(s, 3);
 	__m128 sum0 = _mm_setzero_ps();
 
-	for(size_t i = 0; i < ITER; i++)
+	for(size_t i = 0; i < iters; i++)
 	{
 		__m128 n0, n1, n2, n3;
 		__m128i v0, v1, v2, v3;
 		__m128 suma, sumb, sum1, sum2, sum3;
+		const bool trace = crypto::cn_gpu_inner_trace_enabled() && i == 0;
 
 		prep_dv(idx0, v0, n0);
 		prep_dv(idx1, v1, n1);
 		prep_dv(idx2, v2, n2);
 		prep_dv(idx3, v3, n3);
 		__m128 rc = sum0;
+
+		if (trace)
+		{
+			std::fprintf(stderr, "[cn-gpu-trace] iter0 s=%u idx0_off=%zu idx1_off=%zu idx2_off=%zu idx3_off=%zu\n",
+			             s, idx0.as_byte() - lpad.as_byte(), idx1.as_byte() - lpad.as_byte(),
+			             idx2.as_byte() - lpad.as_byte(), idx3.as_byte() - lpad.as_byte());
+			traceM128i("v0", v0);
+			traceM128i("v1", v1);
+			traceM128i("v2", v2);
+			traceM128i("v3", v3);
+			traceM128f("rc", rc);
+		}
 
 		__m128i out, out2;
 		out = _mm_setzero_si128();
@@ -501,6 +539,12 @@ void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3()
 		single_comupte_wrap<2>(n0, n3, n1, n2, 1.3593750f, rc, sumb, out);
 		single_comupte_wrap<3>(n0, n3, n2, n1, 1.3671875f, rc, sumb, out);
 		sum0 = _mm_add_ps(suma, sumb);
+		if (trace)
+		{
+			traceM128f("suma_after_blk0", suma);
+			traceM128f("sumb_after_blk0", sumb);
+			traceM128i("out_after_blk0", out);
+		}
 		_mm_store_si128(idx0.as_ptr<__m128i>(), _mm_xor_si128(v0, out));
 		out2 = out;
 
@@ -534,6 +578,12 @@ void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3()
 		sum2 = _mm_add_ps(sum2, sum3);
 		sum0 = _mm_add_ps(sum0, sum2);
 
+		if (trace)
+		{
+			traceM128f("sum0_after_reduce", sum0);
+			traceM128i("out2", out2);
+		}
+
 		sum0 = _mm_and_ps(_mm_set1_ps_epi32(0x7fffffff), sum0); // take abs(va) by masking the float sign bit
 		// vs range 0 - 64
 		n0 = _mm_mul_ps(sum0, _mm_set1_ps(16777216.0f));
@@ -547,11 +597,25 @@ void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3()
 		// vs is now between 0 and 1
 		sum0 = _mm_div_ps(sum0, _mm_set1_ps(64.0f));
 		uint32_t n = _mm_cvtsi128_si32(v0);
+		if (trace)
+		{
+			traceM128i("v0_index", v0);
+			traceM128f("sum0_after_div64", sum0);
+			std::fprintf(stderr, "[cn-gpu-trace] iter0 next_s=%u next_idx0_off=%zu\n", n,
+			             scratchpad_ptr(n, 0).as_byte() - lpad.as_byte());
+			crypto::cn_gpu_dump_scratchpad_words("cpu_after_iter0", scratchpad_data(), 809920, 8);
+		}
 		idx0 = scratchpad_ptr(n, 0);
 		idx1 = scratchpad_ptr(n, 1);
 		idx2 = scratchpad_ptr(n, 2);
 		idx3 = scratchpad_ptr(n, 3);
 	}
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::inner_hash_3()
+{
+	inner_hash_3_iters(ITER);
 }
 
 template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
@@ -584,6 +648,91 @@ void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::software_hash_3(const voi
 
     keccakf(spad.as_uqword(), 24);
 	memcpy(pout, spad.as_byte(), 32);
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_prepare_inner(const void* in, size_t len)
+{
+	if(CN_SLOW_HASH_VERSION != 2)
+		return;
+	keccak((const uint8_t*)in, len, spad.as_byte(), 200);
+	explode_scratchpad_3();
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_prepare_mining(const void* in, size_t len,
+                                                                              uint32_t nonce)
+{
+	if(CN_SLOW_HASH_VERSION != 2)
+		return;
+
+	constexpr size_t kInputUlongs = 11;
+	uint64_t input[kInputUlongs] = {};
+	memcpy(input, in, std::min(len, kInputUlongs * sizeof(uint64_t)));
+
+	uint64_t state[25] = {};
+	memcpy(state, input, 8 * sizeof(uint64_t));
+	state[8] = input[8];
+	state[9] = input[9];
+	state[10] = input[10];
+
+	uint32_t* st32 = reinterpret_cast<uint32_t*>(state);
+	st32[9] = (st32[9] & 0x00FFFFFFu) | ((nonce & 0xFFu) << 24);
+	st32[10] = (st32[10] & 0xFF000000u) | (nonce >> 8);
+
+	for (int i = 11; i < 25; ++i)
+		state[i] = 0;
+	state[16] = 0x8000000000000000UL;
+
+	keccakf(state, 24);
+	memcpy(spad.as_byte(), state, 200);
+	explode_scratchpad_3();
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_run_inner()
+{
+	if(CN_SLOW_HASH_VERSION != 2)
+		return;
+	if(check_avx2())
+		inner_hash_3_avx();
+	else
+		inner_hash_3();
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_run_inner_reference()
+{
+	cn_gpu_run_inner();
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_run_inner_reference_iters(size_t iters)
+{
+	if(CN_SLOW_HASH_VERSION != 2)
+		return;
+	if(check_avx2())
+		inner_hash_3_avx_iters(iters);
+	else
+		inner_hash_3_iters(iters);
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_run_inner_sse_iters(size_t iters)
+{
+	if(CN_SLOW_HASH_VERSION != 2)
+		return;
+	inner_hash_3_iters(iters);
+}
+
+template <size_t MEMORY, size_t ITER, size_t CN_SLOW_HASH_VERSION>
+void cn_slow_hash<MEMORY, ITER, CN_SLOW_HASH_VERSION>::cn_gpu_finish(void* out)
+{
+	if(CN_SLOW_HASH_VERSION != 2)
+		return;
+	implode_scratchpad_hard();
+	keccakf(spad.as_uqword(), 24);
+	memcpy(out, spad.as_byte(), 32);
 }
 
 template class cn_v1_hash_t;

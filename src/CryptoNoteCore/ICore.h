@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -15,10 +15,10 @@
 #include <vector>
 
 #include <CryptoNote.h>
-#include "CryptoNoteCore/Difficulty.h"
-
+#include "Difficulty.h"
+#include "Blockchain/CheckpointList.h"
 #include "CryptoNoteCore/MessageQueue.h"
-#include "CryptoNoteCore/BlockchainMessages.h"
+#include "Blockchain/BlockchainMessages.h"
 
 namespace cn {
 
@@ -98,6 +98,7 @@ public:
                               uint64_t& reward, int64_t& emissionChange) = 0;
   virtual bool scanOutputkeysForIndices(const KeyInput& txInToKey, std::list<std::pair<crypto::Hash, size_t>>& outputReferences) = 0;
   virtual bool getBlockDifficulty(uint32_t height, difficulty_type& difficulty) = 0;
+  virtual uint64_t getNextBlockDifficulty() = 0;
   virtual bool getBlockTimestamp(uint32_t height, uint64_t &timestamp) = 0;
   virtual bool getBlockContainingTx(const crypto::Hash& txId, crypto::Hash& blockId, uint32_t& blockHeight) = 0;
   virtual bool getMultisigOutputReference(const MultisignatureInput& txInMultisig, std::pair<crypto::Hash, size_t>& outputReference) = 0;
@@ -114,6 +115,10 @@ public:
 
   virtual bool addMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) = 0;
   virtual bool removeMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) = 0;
+
+  virtual CheckpointList getCheckpointList(uint32_t startHeight = 0, uint32_t endHeight = 0) const = 0;
+  virtual bool addCheckpoint(uint32_t height, const std::string &hash) = 0;
+  virtual void setCheckpointGeneratedCallback(std::function<void(uint32_t, const crypto::Hash &)> callback) = 0;
 };
 
 } //namespace cn

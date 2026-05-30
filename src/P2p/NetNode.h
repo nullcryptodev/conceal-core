@@ -2,7 +2,7 @@
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
 // Copyright (c) 2016-2020 The Karbo developers
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -119,6 +119,8 @@ namespace cn
     bool log_connections() const;
     uint64_t get_connections_count() override;
     size_t get_outgoing_connections_count() const;
+    /** Target outgoing sync lanes (P2P auto-scale adjusts this). */
+    size_t getTargetOutgoingConnectionsCount() const { return m_config.m_net_config.connections_count; }
 
     cn::PeerlistManager& getPeerlistManager() { return m_peerlist; }
 
@@ -204,6 +206,9 @@ namespace cn
     void timedSyncLoop();
     void timeoutLoop();
 
+    void autoScaleLoop();
+    void autoScaleConnections();
+
     template<typename T>
     void safeInterrupt(T& obj) const;
 
@@ -229,6 +234,10 @@ namespace cn
     bool m_allow_local_ip = false;
     bool m_hide_my_port = false;
     std::string m_p2p_state_filename;
+
+    size_t m_minOutgoingConnections = P2P_DEFAULT_MIN_CONNECTIONS;
+    size_t m_maxOutgoingConnections = P2P_DEFAULT_MAX_CONNECTIONS;
+    platform_system::Timer m_autoScaleTimer;
 
     platform_system::Dispatcher& m_dispatcher;
     platform_system::ContextGroup m_workingContextGroup;

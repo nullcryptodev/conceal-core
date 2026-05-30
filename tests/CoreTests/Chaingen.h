@@ -403,9 +403,10 @@ inline bool do_replay_events(std::vector<test_event_entry>& events, t_test_class
   cn::CoreConfig coreConfig;
   coreConfig.init(vm);
   cn::MinerConfig emptyMinerConfig;
+  cn::GpuMinerConfig emptyGpuMinerConfig;
   cn::cryptonote_protocol_stub pr; //TODO: stub only for this kind of test, make real validation of relayed objects
   cn::core c(validator.currency(), &pr, logger);
-  if (!c.init(coreConfig, emptyMinerConfig, false))
+  if (!c.init(coreConfig, emptyMinerConfig, emptyGpuMinerConfig, -1, false))
   {
     std::cout << concolor::magenta << "Failed to init core" << concolor::normal << std::endl;
     return false;

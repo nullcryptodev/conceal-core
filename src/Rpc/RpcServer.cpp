@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -23,6 +23,8 @@
 #include "CryptoNoteCore/TransactionExtra.h"
 #include "CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
 
+#include "Blockchain/BlockchainFilter.h"
+
 #include "P2p/NetNode.h"
 
 #include "CoreRpcServerErrorCodes.h"
@@ -40,6 +42,141 @@ const uint64_t BLOCK_LIST_MAX_COUNT = 1000;
 namespace cn {
 
 namespace {
+
+  // Compute Merkle root from a list of transaction hashes
+  crypto::Hash get_merkle_root(const std::vector<crypto::Hash> &hashes)
+  {
+    if (hashes.empty())
+    {
+      return crypto::Hash();
+    }
+
+    std::vector<crypto::Hash> layer = hashes;
+
+    while (layer.size() > 1)
+    {
+      std::vector<crypto::Hash> next_layer;
+
+      for (size_t i = 0; i < layer.size(); i += 2)
+      {
+        if (i + 1 < layer.size())
+        {
+          // Pair: hash(left + right)
+          crypto::Hash combined;
+          std::vector<uint8_t> concat;
+          concat.reserve(sizeof(crypto::Hash) * 2);
+          concat.insert(concat.end(), layer[i].data, layer[i].data + sizeof(crypto::Hash));
+          concat.insert(concat.end(), layer[i + 1].data, layer[i + 1].data + sizeof(crypto::Hash));
+          crypto::cn_fast_hash(concat.data(), concat.size(), combined);
+          next_layer.push_back(combined);
+        }
+        else
+        {
+          // Odd element, propagate up
+          next_layer.push_back(layer[i]);
+        }
+      }
+
+      layer = std::move(next_layer);
+    }
+
+    return layer[0];
+  }
+
+  // Build Merkle branch from leaf index (returns sibling hashes from leaf to root)
+  std::vector<crypto::Hash> get_merkle_branch(const std::vector<crypto::Hash> &hashes, size_t leaf_index)
+  {
+    std::vector<crypto::Hash> branch;
+
+    if (hashes.empty() || leaf_index >= hashes.size())
+    {
+      return branch;
+    }
+
+    std::vector<crypto::Hash> layer = hashes;
+    size_t idx = leaf_index;
+
+    while (layer.size() > 1)
+    {
+      size_t sibling_idx = idx ^ 1; // XOR with 1 flips last bit (gives sibling)
+
+      if (sibling_idx < layer.size())
+      {
+        branch.push_back(layer[sibling_idx]);
+      }
+      else
+      {
+        // No sibling (odd number of nodes), push the node itself
+        // This follows CryptoNote's Merkle tree implementation
+        branch.push_back(layer[idx]);
+      }
+
+      // Build parent layer
+      std::vector<crypto::Hash> parent_layer;
+      for (size_t i = 0; i < layer.size(); i += 2)
+      {
+        if (i + 1 < layer.size())
+        {
+          crypto::Hash combined;
+          std::vector<uint8_t> concat;
+          concat.reserve(sizeof(crypto::Hash) * 2);
+          concat.insert(concat.end(), layer[i].data, layer[i].data + sizeof(crypto::Hash));
+          concat.insert(concat.end(), layer[i + 1].data, layer[i + 1].data + sizeof(crypto::Hash));
+          crypto::cn_fast_hash(concat.data(), concat.size(), combined);
+          parent_layer.push_back(combined);
+        }
+        else
+        {
+          parent_layer.push_back(layer[i]);
+        }
+      }
+
+      layer = std::move(parent_layer);
+      idx >>= 1; // Move up to parent index
+    }
+
+    return branch;
+  }
+
+  // Helper to check if an output's public key is derived from a view public key
+  // This is a *candidate* check - the client still needs to use its view private key
+  // to actually derive and confirm ownership. This just filters obviously wrong outputs.
+  bool is_candidate_output(const crypto::PublicKey &output_key,
+                           const crypto::PublicKey &view_pub_key)
+  {
+    // If view_pub_key is zero, nothing can be derived
+    if (view_pub_key == cn::NULL_PUBLIC_KEY)
+    {
+      return false;
+    }
+
+    // In CryptoNote, outputs are created using:
+    // P = Hs(rA || i)G + B
+    // Where:
+    // - r is ephemeral private key (tx pub key)
+    // - A is recipient's view public key
+    // - i is output index
+    // - B is recipient's spend public key
+    // We can't derive without the private view key, but we can check
+    // if the output key is *plausibly* derived from view_pub_key.
+    // This is a simplified filter - the client must do the actual derivation.
+
+    // For now, we return all KeyOutputs and let the client filter.
+    // The node cannot know which outputs belong to the address without
+    // the private view key. This is by design for privacy.
+    return true;
+  }
+
+  // Convert global output index to (transaction hash, output index)
+  bool find_output_by_global_index(cn::core &m_core, uint32_t global_index,
+                                   crypto::Hash &tx_hash, uint16_t &output_index)
+  {
+    // This would require indexing outputs by global index.
+    // Most CryptoNote nodes have this mapping.
+    // For simplicity, we return false and let the client use other methods.
+    // A production implementation would query m_core's output index.
+    return false;
+  }
 
 template <typename Command>
 RpcServer::HandlerFunction binMethod(bool (RpcServer::*handler)(typename Command::request const&, typename Command::response&)) {
@@ -174,7 +311,12 @@ bool RpcServer::processJsonRpcRequest(const HttpRequest& request, HttpResponse& 
         {"getblocktimestamp", {makeMemberMethod(&RpcServer::on_get_block_timestamp_by_height), true}},
         {"getblockheaderbyheight", {makeMemberMethod(&RpcServer::on_get_block_header_by_height), false}},
         {"getrawtransactionspool", {makeMemberMethod(&RpcServer::on_get_transactions_pool_raw), true}},
-        {"getrawtransactionsbyheights", {makeMemberMethod(&RpcServer::on_get_txs_with_output_global_indexes), true}}
+        {"getrawtransactionsbyheights", {makeMemberMethod(&RpcServer::on_get_txs_with_output_global_indexes), true}},
+        {"get_merkle_proof", {makeMemberMethod(&RpcServer::on_get_merkle_proof), false}},
+        {"get_outputs_for_address", {makeMemberMethod(&RpcServer::on_get_outputs_for_address), false}},
+        {"get_spv_outputs", {makeMemberMethod(&RpcServer::on_get_spv_outputs), false}},
+        {"get_filter_records", {makeMemberMethod(&RpcServer::on_get_filter_records), true}},
+        {"get_domain", {makeMemberMethod(&RpcServer::on_get_domain), true}},
     };
 
     auto it = jsonRpcHandlers.find(jsonRequest.getMethod());
@@ -752,6 +894,11 @@ bool RpcServer::k_on_check_reserve_proof(const K_COMMAND_RPC_CHECK_RESERVE_PROOF
       throw JsonRpc::JsonRpcError{CORE_RPC_ERROR_CODE_INTERNAL_ERROR, "index_in_tx is out of bound"};
     }
 
+    if (tx.outputs[proof.index_in_tx].target.type() != typeid(KeyOutput))
+    {
+      throw JsonRpc::JsonRpcError{CORE_RPC_ERROR_CODE_INTERNAL_ERROR, std::string("output is not a key output: ") + tx.outputs[proof.index_in_tx].target.type().name()};
+    }
+
     const KeyOutput out_key = boost::get<KeyOutput>(tx.outputs[proof.index_in_tx].target);
 
     // get tx pub key
@@ -980,6 +1127,7 @@ bool RpcServer::on_get_info(const COMMAND_RPC_GET_INFO::request&, COMMAND_RPC_GE
   crypto::Hash last_block_hash = m_core.getBlockIdByHeight(m_core.get_current_blockchain_height() - 1);
   res.top_block_hash = common::podToHex(last_block_hash);
   res.version = PROJECT_VERSION;
+  res.upgrade_height_v9 = cn::parameters::UPGRADE_HEIGHT_V9;
 
   Block blk;
   if (!m_core.getBlockByHash(last_block_hash, blk)) {
@@ -1528,6 +1676,499 @@ bool RpcServer::on_get_block_header_by_height(const COMMAND_RPC_GET_BLOCK_HEADER
   res.status = CORE_RPC_STATUS_OK;
   return true;
 }
+bool RpcServer::on_get_merkle_proof(const COMMAND_RPC_GET_MERKLE_PROOF::request &req,
+                                    COMMAND_RPC_GET_MERKLE_PROOF::response &res)
+{
+  // Find which block contains this transaction
+  crypto::Hash block_hash;
+  uint32_t block_height;
 
+  if (!m_core.getBlockContainingTx(req.tx_hash, block_hash, block_height))
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM,
+                                "Transaction not found in main chain");
+  }
 
+  // Get the full block
+  Block blk;
+  if (!m_core.getBlockByHash(block_hash, blk))
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_INTERNAL_ERROR,
+                                "Failed to retrieve block containing transaction");
+  }
+
+  // Build list of all transaction hashes in the block (coinbase + transactions)
+  std::vector<crypto::Hash> tx_hashes;
+
+  // Add coinbase transaction hash
+  tx_hashes.push_back(getObjectHash(blk.baseTransaction));
+
+  // Add all other transaction hashes
+  for (const auto &txid : blk.transactionHashes)
+  {
+    tx_hashes.push_back(txid);
+  }
+
+  // Find the index of our transaction
+  size_t tx_index = 0;
+  bool found = false;
+  for (size_t i = 0; i < tx_hashes.size(); ++i)
+  {
+    if (tx_hashes[i] == req.tx_hash)
+    {
+      tx_index = i;
+      found = true;
+      break;
+    }
+  }
+
+  if (!found)
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_INTERNAL_ERROR,
+                                "Transaction hash not found in block (inconsistent state)");
+  }
+
+  // Compute Merkle root
+  crypto::Hash merkle_root = get_merkle_root(tx_hashes);
+
+  // Build Merkle branch
+  std::vector<crypto::Hash> merkle_branch = get_merkle_branch(tx_hashes, tx_index);
+
+  // Fill response
+  res.block_height = block_height;
+  res.block_hash = common::podToHex(block_hash);
+  res.merkle_root = common::podToHex(merkle_root);
+  res.tx_index = static_cast<uint32_t>(tx_index);
+  res.merkle_branch.reserve(merkle_branch.size());
+  for (const auto &branch_hash : merkle_branch)
+  {
+    res.merkle_branch.push_back(common::podToHex(branch_hash));
+  }
+  res.status = CORE_RPC_STATUS_OK;
+
+  return true;
+}
+bool RpcServer::on_get_outputs_for_address(const COMMAND_RPC_GET_OUTPUTS_FOR_ADDRESS::request &req,
+                                           COMMAND_RPC_GET_OUTPUTS_FOR_ADDRESS::response &res)
+{
+  // Validate height range
+  uint32_t current_height = m_core.get_current_blockchain_height();
+  if (current_height == 0)
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_INTERNAL_ERROR,
+                                "Blockchain not initialized");
+  }
+
+  if (req.from_height >= current_height)
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM,
+                                "from_height (" + std::to_string(req.from_height) +
+                                    ") exceeds current blockchain height (" + std::to_string(current_height) + ")");
+  }
+
+  uint32_t to_height = std::min(req.to_height, current_height - 1);
+  if (req.from_height > to_height)
+  {
+    // Empty range
+    res.outputs.clear();
+    res.next_from_height = to_height + 1;
+    res.has_more = false;
+    res.status = CORE_RPC_STATUS_OK;
+    return true;
+  }
+
+  // Parse view public key from hex
+  crypto::PublicKey view_pub_key;
+  if (!common::podFromHex(req.view_pub_key, view_pub_key))
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM,
+                                "Invalid view_pub_key hex: " + req.view_pub_key);
+  }
+
+  // Validate max_outputs
+  uint32_t max_outputs = req.max_outputs;
+  if (max_outputs == 0 || max_outputs > 50000)
+  {
+    max_outputs = 10000; // Reasonable default
+  }
+
+  // Scan blocks
+  res.outputs.reserve(std::min(max_outputs, 10000u));
+  uint32_t outputs_found = 0;
+  uint32_t last_scanned_height = req.from_height;
+
+  for (uint32_t height = req.from_height; height <= to_height && outputs_found < max_outputs; ++height)
+  {
+    last_scanned_height = height;
+
+    // Get block hash
+    crypto::Hash block_hash = m_core.getBlockIdByHeight(height);
+    if (block_hash == cn::NULL_HASH)
+    {
+      // Block not found (shouldn't happen)
+      continue;
+    }
+
+    // Get block
+    Block blk;
+    if (!m_core.getBlockByHash(block_hash, blk))
+    {
+      // Log error but continue
+      continue;
+    }
+
+    // Get block timestamp
+    uint64_t block_timestamp = blk.timestamp;
+
+    // Helper lambda to process outputs from a transaction
+    auto process_transaction_outputs = [&](const crypto::Hash &tx_id,
+                                           const Transaction &tx,
+                                           uint32_t block_height,
+                                           uint64_t timestamp)
+    {
+      // Get global output indices for this transaction
+      std::vector<uint32_t> global_indices;
+      if (!m_core.get_tx_outputs_gindexs(tx_id, global_indices))
+      {
+        // Can't get indices, skip this transaction
+        return;
+      }
+
+      // Iterate through outputs
+      for (size_t i = 0; i < tx.outputs.size(); ++i)
+      {
+        const auto &output = tx.outputs[i];
+
+        // Only interested in KeyOutputs (standard transactions)
+        if (output.target.type() != typeid(KeyOutput))
+        {
+          continue;
+        }
+
+        const KeyOutput &key_output = boost::get<KeyOutput>(output.target);
+
+        // Check if this output is a candidate for this view key
+        // Note: This is NOT definitive - the client must use its view private key
+        // to derive and check ownership. The node cannot determine ownership
+        // without the private key (by design for privacy).
+        if (!is_candidate_output(key_output.key, view_pub_key))
+        {
+          continue;
+        }
+
+        // Add to response
+        COMMAND_RPC_GET_OUTPUTS_FOR_ADDRESS::response::OutputEntry entry;
+        entry.block_height = block_height;
+        entry.tx_hash = common::podToHex(tx_id);
+        entry.amount = output.amount;
+        entry.global_output_index = (i < global_indices.size()) ? global_indices[i] : 0;
+        entry.output_public_key = common::podToHex(key_output.key);
+        entry.timestamp = timestamp;
+
+        res.outputs.push_back(entry);
+        outputs_found++;
+
+        if (outputs_found >= max_outputs)
+        {
+          break; // Reached limit
+        }
+      }
+    };
+
+    // Process coinbase transaction
+    crypto::Hash coinbase_tx_hash = getObjectHash(blk.baseTransaction);
+    process_transaction_outputs(coinbase_tx_hash, blk.baseTransaction, height, block_timestamp);
+
+    if (outputs_found >= max_outputs)
+    {
+      break;
+    }
+
+    // Process regular transactions in batch for efficiency
+    if (!blk.transactionHashes.empty())
+    {
+      std::list<crypto::Hash> missed_txs;
+      std::list<Transaction> txs;
+      m_core.getTransactions(blk.transactionHashes, txs, missed_txs);
+
+      auto tx_hash_it = blk.transactionHashes.begin();
+      for (const auto &tx : txs)
+      {
+        if (outputs_found >= max_outputs)
+        {
+          break;
+        }
+        crypto::Hash tx_hash = *tx_hash_it;
+        process_transaction_outputs(tx_hash, tx, height, block_timestamp);
+        ++tx_hash_it;
+      }
+    }
+  }
+
+  // Set pagination info
+  res.next_from_height = (outputs_found >= max_outputs) ? last_scanned_height : to_height + 1;
+  res.has_more = (outputs_found >= max_outputs) && (last_scanned_height < to_height);
+  res.status = CORE_RPC_STATUS_OK;
+
+  return true;
+}
+
+bool RpcServer::on_get_spv_outputs(const COMMAND_RPC_GET_SPV_OUTPUTS::request &req,
+                                   COMMAND_RPC_GET_SPV_OUTPUTS::response &res)
+{
+  uint32_t current_height = m_core.get_current_blockchain_height();
+  if (current_height == 0)
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_INTERNAL_ERROR, "Blockchain not initialized");
+  }
+
+  if (req.from_height >= current_height)
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM,
+                                "from_height exceeds current blockchain height");
+  }
+
+  uint32_t to_height = std::min(req.to_height, current_height - 1);
+  if (req.from_height > to_height)
+  {
+    res.outputs.clear();
+    res.status = CORE_RPC_STATUS_OK;
+    return true;
+  }
+
+  // Parse private view key from hex
+  crypto::SecretKey view_secret_key;
+  crypto::PublicKey view_public_key;
+  if (!common::podFromHex(req.view_key, view_secret_key))
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM, "Invalid view_key hex");
+  }
+
+  // Parse spend public key if provided
+  crypto::PublicKey spend_public_key;
+  bool has_spend_key = !req.spend_key.empty();
+  if (has_spend_key)
+  {
+    if (!common::podFromHex(req.spend_key, spend_public_key))
+    {
+      throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM, "Invalid spend_key hex");
+    }
+  }
+  else
+  {
+    spend_public_key = crypto::PublicKey();
+  }
+
+  // Set max outputs limit
+  uint32_t max_outputs = req.max_outputs;
+  if (max_outputs == 0 || max_outputs > 50000)
+  {
+    max_outputs = 10000;
+  }
+
+  res.outputs.reserve(std::min(max_outputs, 10000u));
+  uint32_t outputs_found = 0;
+
+  for (uint32_t height = req.from_height; height <= to_height && outputs_found < max_outputs; ++height)
+  {
+    crypto::Hash block_hash = m_core.getBlockIdByHeight(height);
+    if (block_hash == cn::NULL_HASH)
+      continue;
+
+    Block blk;
+    if (!m_core.getBlockByHash(block_hash, blk))
+      continue;
+
+    uint64_t block_timestamp = blk.timestamp;
+
+    // Helper to check if an output belongs to our wallet
+    auto check_output = [&](const TransactionPrefix &tx, const crypto::Hash &tx_hash,
+                            uint32_t block_height, uint64_t timestamp)
+    {
+      crypto::PublicKey tx_pub_key = cn::getTransactionPublicKeyFromExtra(tx.extra);
+      if (tx_pub_key == cn::NULL_PUBLIC_KEY)
+        return;
+
+      crypto::KeyDerivation derivation;
+      if (!crypto::generate_key_derivation(tx_pub_key, view_secret_key, derivation))
+        return;
+
+      size_t key_index = 0;
+      for (size_t i = 0; i < tx.outputs.size(); ++i)
+      {
+        const auto &output = tx.outputs[i];
+
+        if (output.target.type() == typeid(KeyOutput))
+        {
+          const KeyOutput &key_out = boost::get<KeyOutput>(output.target);
+
+          crypto::PublicKey derived_key;
+          if (crypto::derive_public_key(derivation, key_index, spend_public_key, derived_key) &&
+              memcmp(&derived_key, &key_out.key, sizeof(crypto::PublicKey)) == 0)
+          {
+            COMMAND_RPC_GET_SPV_OUTPUTS::response::OutputEntry entry;
+            entry.block_height = block_height;
+            entry.tx_hash = common::podToHex(tx_hash);
+            entry.amount = output.amount;
+            entry.output_index = static_cast<uint32_t>(i);
+            entry.output_public_key = common::podToHex(key_out.key);
+            entry.tx_public_key = common::podToHex(tx_pub_key);
+            entry.timestamp = timestamp;
+
+            res.outputs.push_back(entry);
+            outputs_found++;
+
+            if (outputs_found >= max_outputs)
+              return;
+          }
+          ++key_index;
+        }
+        else if (output.target.type() == typeid(MultisignatureOutput))
+        {
+          const MultisignatureOutput &msig_out = boost::get<MultisignatureOutput>(output.target);
+          for (size_t ki = 0; ki < msig_out.keys.size(); ++ki)
+          {
+            crypto::PublicKey recovered_spend;
+            if (crypto::underive_public_key(derivation, i, msig_out.keys[ki], recovered_spend) &&
+                memcmp(&recovered_spend, &spend_public_key, sizeof(crypto::PublicKey)) == 0)
+            {
+              COMMAND_RPC_GET_SPV_OUTPUTS::response::OutputEntry entry;
+              entry.block_height = block_height;
+              entry.tx_hash = common::podToHex(tx_hash);
+              entry.amount = output.amount;
+              entry.output_index = static_cast<uint32_t>(i);
+              entry.output_public_key = common::podToHex(msig_out.keys[ki]);
+              entry.tx_public_key = common::podToHex(tx_pub_key);
+              entry.timestamp = timestamp;
+              entry.is_deposit = (msig_out.term > 0);
+              entry.term = msig_out.term;
+
+              res.outputs.push_back(entry);
+              outputs_found++;
+              break;
+            }
+          }
+          key_index += msig_out.keys.size();
+        }
+      }
+    };
+
+    // Process coinbase transaction
+    check_output(blk.baseTransaction, getObjectHash(blk.baseTransaction), height, block_timestamp);
+    if (outputs_found >= max_outputs)
+      break;
+
+    // Process regular transactions
+    if (!blk.transactionHashes.empty())
+    {
+      std::list<crypto::Hash> missed_txs;
+      std::list<Transaction> txs;
+      m_core.getTransactions(blk.transactionHashes, txs, missed_txs);
+
+      auto tx_hash_it = blk.transactionHashes.begin();
+      for (const auto &tx : txs)
+      {
+        if (outputs_found >= max_outputs)
+          break;
+        check_output(tx, *tx_hash_it, height, block_timestamp);
+        ++tx_hash_it;
+      }
+    }
+  }
+
+  res.next_from_height = to_height + 1;
+  res.has_more = (outputs_found >= max_outputs && to_height < current_height - 1);
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+bool RpcServer::on_get_filter_records(const COMMAND_RPC_GET_FILTER_RECORDS::request &req,
+                                      COMMAND_RPC_GET_FILTER_RECORDS::response &res)
+{
+  uint32_t currentHeight = m_core.get_current_blockchain_height();
+  if (currentHeight == 0)
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_INTERNAL_ERROR,
+                                "Blockchain not initialized");
+  }
+
+  uint32_t start = req.start_height;
+  uint32_t end = std::min(req.end_height, currentHeight - 1);
+
+  if (start > end)
+  {
+    res.status = CORE_RPC_STATUS_OK;
+    return true;
+  }
+
+  // Limit range to prevent abuse
+  const uint32_t MAX_RANGE = 10000;
+  if (end - start > MAX_RANGE)
+  {
+    end = start + MAX_RANGE;
+  }
+
+  res.records.reserve(end - start + 1);
+
+  for (uint32_t h = start; h <= end; ++h)
+  {
+    BlockFilterRecord record;
+    if (m_core.getBlockFilterRecord(h, record))
+    {
+      res.records.push_back(std::move(record));
+    }
+  }
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_domain(const COMMAND_RPC_GET_DOMAIN::request &req,
+                              COMMAND_RPC_GET_DOMAIN::response &res)
+{
+  if (req.domain.empty())
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM, "Domain name is empty");
+  }
+
+  DomainIndex::DomainEntry entry;
+  if (!m_core.getDomainEntry(req.domain, entry))
+  {
+    throw JsonRpc::JsonRpcError(CORE_RPC_ERROR_CODE_WRONG_PARAM,
+                                "Domain not found: " + req.domain);
+  }
+
+  if (req.include_proof)
+  {
+    crypto::Hash blockHash = m_core.getBlockIdByHeight(static_cast<uint32_t>(entry.registrationHeight));
+    Block blk;
+    if (m_core.getBlockByHash(blockHash, blk))
+    {
+      std::vector<crypto::Hash> txHashes;
+      txHashes.push_back(getObjectHash(blk.baseTransaction));
+      for (const auto &h : blk.transactionHashes)
+        txHashes.push_back(h);
+
+      MerkleProof proof = MerkleProof::build(txHashes, entry.transactionIndex);
+      res.merkle_root = common::podToHex(proof.rootHash);
+      res.merkle_branch.reserve(proof.branch.size());
+      for (const auto &b : proof.branch)
+        res.merkle_branch.push_back(common::podToHex(b));
+    }
+  }
+
+  res.domain = entry.registration.domain;
+  res.tier = entry.registration.tier;
+  res.domain_pub = common::podToHex(entry.registration.domain_pub);
+  res.domain_view_pub = common::podToHex(entry.registration.domain_view_pub);
+  res.encrypted_addr = common::toHex(entry.registration.encrypted_addr.data(),
+                                     entry.registration.encrypted_addr.size());
+  res.metadata = common::toHex(entry.registration.metadata.data(),
+                               entry.registration.metadata.size());
+  res.registration_height = static_cast<uint32_t>(entry.registrationHeight);
+  res.transaction_index = entry.transactionIndex;
+  res.output_index = entry.outputIndex;
+  res.status = CORE_RPC_STATUS_OK;
+
+  return true;
+}
 }

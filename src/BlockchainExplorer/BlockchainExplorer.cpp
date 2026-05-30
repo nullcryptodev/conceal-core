@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -369,17 +369,10 @@ bool BlockchainExplorer::getPoolTransactions(uint64_t timestampBegin, uint64_t t
 
   logger(DEBUGGING) << "Get transactions by timestamp request came.";
   NodeRequest request(
-    std::bind(
-      &INode::getPoolTransactions,
-      std::ref(node),
-      timestampBegin,
-      timestampEnd,
-      transactionsNumberLimit,
-      std::ref(transactions),
-      std::ref(transactionsNumberWithinTimestamps),
-      std::placeholders::_1
-    )
-  );
+      [this, timestampBegin, timestampEnd, transactionsNumberLimit, &transactions, &transactionsNumberWithinTimestamps](const INode::Callback &callback)
+      {
+        node.getPoolTransactions(timestampBegin, timestampEnd, transactionsNumberLimit, transactions, transactionsNumberWithinTimestamps, callback);
+      });
 
   std::error_code ec = request.performBlocking();
   if (ec) {

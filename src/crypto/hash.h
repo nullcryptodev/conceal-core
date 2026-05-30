@@ -1,6 +1,6 @@
 // Copyright (c) 2012-2016, The CryptoNote developers, The Bytecoin developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -72,7 +72,27 @@ namespace crypto {
   void cn_slow_hash_v0(cn_context &context, const void *data, size_t length, Hash &hash);
   void cn_fast_slow_hash_v1(cn_context &context, const void *data, size_t length, Hash &hash);
   void cn_conceal_slow_hash_v0(cn_context &context, const void *data, size_t length, Hash &hash);  
-  void cn_gpu_hash_v0(cn_context &context, const void *data, size_t length, Hash &hash);  
+  void cn_gpu_hash_v0(cn_context &context, const void *data, size_t length, Hash &hash);
+  void cn_gpu_prepare_inner(cn_context &context, const void *data, size_t length);
+  /** Mining path: cn0 (keccak state + nonce inject) + cn00 (explode); matches OpenCL cn0_cn_gpu/cn00_cn_gpu. */
+  void cn_gpu_prepare_mining(cn_context &context, const void *data, size_t length, uint32_t nonce);
+  void cn_gpu_run_inner(cn_context &context);
+  void cn_gpu_run_inner_reference(cn_context &context);
+  void cn_gpu_run_inner_reference_iters(cn_context &context, size_t iters);
+  /** SSE inner_hash_3_iters only (x86 diagnostic; not production when AVX2 is used) */
+  void cn_gpu_run_inner_sse_reference_iters(cn_context &context, size_t iters);
+  /** prepare + production inner (AVX2 on x86 when available) + finish; OpenCL equivalence reference */
+  void cn_gpu_hash_staged_reference(cn_context &context, const void *data, size_t length, Hash &hash);
+  void cn_gpu_finish_hash(cn_context &context, Hash &hash);
+  uint8_t* cn_gpu_scratchpad_ptr(cn_context &context);
+  uint8_t* cn_gpu_state_ptr(cn_context &context);
+  size_t cn_gpu_scratchpad_bytes();
+  size_t cn_gpu_state_bytes();
+
+  bool cn_gpu_inner_trace_enabled();
+  void cn_gpu_set_inner_trace(bool enable);
+  void cn_gpu_dump_scratchpad_words(const char* tag, const uint8_t* scratchpad, size_t off,
+                                    size_t count);
 
   inline void tree_hash(const Hash *hashes, size_t count, Hash &root_hash) {
     tree_hash(reinterpret_cast<const char (*)[HASH_SIZE]>(hashes), count, reinterpret_cast<char *>(&root_hash));

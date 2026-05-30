@@ -1,4 +1,5 @@
 // Copyright (c) 2012-2016, The CryptoNote developers, The Bytecoin developers
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // This file is part of Karbo.
 //
@@ -17,75 +18,124 @@
 
 #include "HttpClient.h"
 
+#include <chrono>
+#include <thread>
+
 #include <HTTP/HttpParser.h>
 #include <System/Ipv4Resolver.h>
-#include <System/Ipv4Address.h>
 #include <System/TcpConnector.h>
+#include <System/Ipv4Address.h>
 
-namespace cn {
+namespace cn
+{
 
-HttpClient::HttpClient(platform_system::Dispatcher& dispatcher, const std::string& address, uint16_t port) :
-  m_dispatcher(dispatcher), m_address(address), m_port(port) {
-}
+  HttpClient::HttpClient(platform_system::Dispatcher &dispatcher, const std::string &address,
+                         uint16_t port)
+      : m_dispatcher(dispatcher), m_address(address), m_port(port) {}
 
-HttpClient::~HttpClient() {
-  if (m_connected) {
-    disconnect();
-  }
-}
-
-void HttpClient::request(const HttpRequest &req, HttpResponse &res) {
-  if (!m_connected) {
-    connect();
+  HttpClient::~HttpClient()
+  {
+    if (m_connected)
+      disconnect();
   }
 
-  try {
-    std::iostream stream(m_streamBuf.get());
-    HttpParser parser;
-    stream << req;
-    stream.flush();
-    parser.receiveResponse(stream, res);
-  } catch (const std::exception &) {
-    disconnect();
-    throw;
-  }
-}
+  void HttpClient::request(const HttpRequest &req, HttpResponse &res)
+  {
+    if (!m_connected)
+      connect();
 
-void HttpClient::connect() {
-  try {
-    auto ipAddr = platform_system::Ipv4Resolver(m_dispatcher).resolve(m_address);
-    m_connection = platform_system::TcpConnector(m_dispatcher).connect(ipAddr, m_port);
-    m_streamBuf.reset(new platform_system::TcpStreambuf(m_connection));
-    m_connected = true;
-  } catch (const std::exception& e) {
-    throw ConnectException(e.what());
-  }
-}
-
-bool HttpClient::isConnected() const {
-  return m_connected;
-}
-
-void HttpClient::disconnect() {
-  m_streamBuf.reset();
-  try {
-    m_connection.write(nullptr, 0); //Socket shutdown.
-  } catch (const std::exception& e) {
-    m_connected = false;
-    throw ConnectException(e.what());
+    try
+    {
+      std::iostream stream(m_streamBuf.get());
+      HttpParser parser;
+      stream << req;
+      stream.flush();
+      parser.receiveResponse(stream, res);
+    }
+    catch (const std::exception &)
+    {
+      disconnect();
+      throw;
+    }
   }
 
-  try {
+  bool HttpClient::connect()
+  {
+    try
+    {
+      platform_system::Ipv4Resolver resolver(m_dispatcher);
+      auto addr = resolver.resolve(m_address);
+
+      // Connect with a 3-second timeout to avoid hanging if the daemon
+      // is unreachable. The platform's TcpConnector blocks, so we run it
+      // in a detached thread and poll for completion.
+      bool connected = false;
+      std::exception_ptr connectException;
+
+      std::thread connectThread([&]()
+                                {
+      try
+      {
+        m_connection = platform_system::TcpConnector(m_dispatcher).connect(addr, m_port);
+        connected = true;
+      }
+      catch (...)
+      {
+        connectException = std::current_exception();
+      } });
+
+      connectThread.detach();
+
+      auto start = std::chrono::steady_clock::now();
+      while (!connected && !connectException)
+      {
+        if (std::chrono::steady_clock::now() - start > std::chrono::seconds(3))
+          break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+
+      if (!connected)
+      {
+        m_connection = platform_system::TcpConnection();
+        return false;
+      }
+
+      if (connectException)
+        std::rethrow_exception(connectException);
+
+      m_streamBuf.reset(new platform_system::TcpStreambuf(m_connection));
+      m_connected = true;
+      return true;
+    }
+    catch (const std::exception &)
+    {
+      m_connection = platform_system::TcpConnection();
+      return false;
+    }
+  }
+
+  bool HttpClient::isConnected() const
+  {
+    return m_connected;
+  }
+
+  void HttpClient::disconnect()
+  {
+    m_streamBuf.reset();
+
+    try
+    {
+      m_connection.write(nullptr, 0);
+    }
+    catch (const std::exception &)
+    {
+    }
+
     m_connection = platform_system::TcpConnection();
-  } catch (const std::exception& e) {
     m_connected = false;
-    throw ConnectException(e.what());
   }
 
-  m_connected = false;
-}
+  ConnectException::ConnectException(const std::string &whatArg)
+      : std::runtime_error(whatArg.c_str()) {}
 
-ConnectException::ConnectException(const std::string& whatArg) : std::runtime_error(whatArg.c_str()) {
-}
-
-}
+} // namespace cn

@@ -1,6 +1,6 @@
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
-// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
+// Copyright (c) 2018-2026 Conceal Network & Conceal Devs
 //
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -97,6 +97,7 @@ namespace cn {
     virtual size_t addOutput(uint64_t amount, const std::vector<AccountPublicAddress>& to, uint32_t requiredSignatures, uint32_t term = 0) override;
     virtual size_t addOutput(uint64_t amount, const KeyOutput& out) override;
     virtual size_t addOutput(uint64_t amount, const MultisignatureOutput& out) override;
+    virtual size_t addOutput(uint64_t amount, const StandardPaymentOutput &out) override;
 
     virtual void signInputKey(size_t input, const transaction_types::InputKeyInfo& info, const KeyPair& ephKeys) override;
     virtual void signInputMultisignature(size_t input, const PublicKey& sourceTransactionKey, size_t outputIndex, const AccountKeys& accountKeys) override;
@@ -336,6 +337,17 @@ namespace cn {
     size_t outputIndex = transaction.outputs.size();
     TransactionOutput realOut = { amount, out };
     transaction.outputs.emplace_back(realOut);
+    invalidateHash();
+    return outputIndex;
+  }
+
+  size_t TransactionImpl::addOutput(uint64_t amount, const StandardPaymentOutput &out)
+  {
+    checkIfSigning();
+    size_t outputIndex = transaction.outputs.size();
+    TransactionOutput realOut = {amount, out};
+    transaction.outputs.emplace_back(realOut);
+    transaction.version = TRANSACTION_VERSION_3;
     invalidateHash();
     return outputIndex;
   }
