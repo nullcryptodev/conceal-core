@@ -78,7 +78,6 @@ public:
   bool append_with_peer_gray(const PeerlistEntry& pr);
   bool set_peer_just_seen(PeerIdType peer, uint32_t ip, uint32_t port);
   bool set_peer_just_seen(PeerIdType peer, const NetworkAddress& addr);
-  bool set_peer_unreachable(const PeerlistEntry& pr);
   bool is_ip_allowed(uint32_t ip) const;
   void trim_white_peerlist();
   void trim_gray_peerlist();

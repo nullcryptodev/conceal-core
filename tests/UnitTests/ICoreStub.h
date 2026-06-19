@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <unordered_map>
 
 #include "CryptoNoteCore/CryptoNoteBasic.h"
@@ -91,6 +92,10 @@ public:
 
   virtual bool addMessageQueue(cn::MessageQueue<cn::BlockchainMessage>& messageQueuePtr) override;
   virtual bool removeMessageQueue(cn::MessageQueue<cn::BlockchainMessage>& messageQueuePtr) override;
+
+  cn::CheckpointList getCheckpointList(uint32_t startHeight = 0, uint32_t endHeight = 0) const override;
+  bool addCheckpoint(uint32_t height, const std::string& hash) override;
+  void setCheckpointGeneratedCallback(std::function<void(uint32_t, const crypto::Hash&)> callback) override;
 
 
   void set_blockchain_top(uint32_t height, const crypto::Hash& top_id);

@@ -14,7 +14,7 @@
 #include <chrono>
 #include <thread>
 #include <ctime>
-#include <dirent.h>
+#include <boost/filesystem.hpp>
 
 using namespace cn;
 
@@ -439,25 +439,22 @@ namespace BoltRPC
   {
     std::vector<std::string> wallets;
 
-    DIR *dir = opendir(m_dataDir.c_str());
-    if (!dir)
+    boost::system::error_code ec;
+    if (!boost::filesystem::is_directory(m_dataDir, ec))
       return wallets;
 
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != nullptr)
+    for (boost::filesystem::directory_iterator it(m_dataDir, ec), end; it != end; it.increment(ec))
     {
-      std::string name(entry->d_name);
-      if (name == "." || name == "..")
+      if (ec)
+        break;
+      if (!boost::filesystem::is_regular_file(it->status()))
         continue;
 
+      const std::string name = it->path().filename().string();
       if (name.size() > 5 && name.substr(name.size() - 5) == ".keys")
-      {
-        std::string walletName = name.substr(0, name.size() - 5);
-        wallets.push_back(walletName);
-      }
+        wallets.push_back(name.substr(0, name.size() - 5));
     }
 
-    closedir(dir);
     return wallets;
   }
 

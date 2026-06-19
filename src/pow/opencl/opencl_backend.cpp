@@ -49,6 +49,23 @@ std::string readKernelFile()
 }
 } // namespace
 
+struct OpenclPowBackend::OpenclState
+{
+#ifdef CONCEAL_WITH_OPENCL
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  cl_context context = nullptr;
+  cl_command_queue queue = nullptr;
+  cl_program program = nullptr;
+  cl_kernel innerKernel = nullptr;
+  cl_mem spads = nullptr;
+  cl_mem lpads = nullptr;
+  size_t maxJobs = 0;
+  std::vector<uint64_t> hostSpads;
+  std::vector<uint8_t> hostLpads;
+#endif
+};
+
 OpenclPowBackend::OpenclPowBackend(int deviceIndex, uint32_t batchSize, uint32_t minBatchSize,
                                    uint32_t maxWaitUs, bool debugCrossCheck, bool debugInnerTrace)
     : m_batchSize(batchSize), m_minBatchSize(minBatchSize), m_maxWaitUs(maxWaitUs),
@@ -79,23 +96,6 @@ OpenclPowBackend::OpenclPowBackend(int deviceIndex, uint32_t batchSize, uint32_t
   }
 #endif
 }
-
-#ifdef CONCEAL_WITH_OPENCL
-struct OpenclPowBackend::OpenclState
-{
-  cl_platform_id platform = nullptr;
-  cl_device_id device = nullptr;
-  cl_context context = nullptr;
-  cl_command_queue queue = nullptr;
-  cl_program program = nullptr;
-  cl_kernel innerKernel = nullptr;
-  cl_mem spads = nullptr;
-  cl_mem lpads = nullptr;
-  size_t maxJobs = 0;
-  std::vector<uint64_t> hostSpads;
-  std::vector<uint8_t> hostLpads;
-};
-#endif
 
 OpenclPowBackend::~OpenclPowBackend()
 {

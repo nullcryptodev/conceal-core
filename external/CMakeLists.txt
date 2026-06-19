@@ -11,11 +11,14 @@ if (DO_TESTS)
 endif()
 
 if(ENABLE_MDBX)
-    set(MDBX_BUILD_TOOLS OFF CACHE BOOL "Disable MDBX tools")
-    set(MDBX_BUILD_TESTS OFF CACHE BOOL "Disable MDBX tests")
+    set(MDBX_BUILD_TOOLS OFF CACHE BOOL "Disable MDBX tools" FORCE)
+    set(MDBX_ENABLE_TESTS OFF CACHE BOOL "Disable MDBX tests" FORCE)
+    set(MDBX_BUILD_CXX OFF CACHE BOOL "Disable MDBX C++ API (conceal uses C API only)" FORCE)
 
     set(CMAKE_C_FLAGS_BAK "${CMAKE_C_FLAGS}")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-undef -Wno-logical-op -Wno-aggregate-return -Wno-nested-externs -Wno-discarded-qualifiers -Wno-strict-prototypes -Wno-old-style-definition")
+    if(NOT MSVC)
+      set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-undef -Wno-logical-op -Wno-aggregate-return -Wno-nested-externs -Wno-discarded-qualifiers -Wno-strict-prototypes -Wno-old-style-definition")
+    endif()
 
     add_subdirectory(mdbx)
     
@@ -23,6 +26,10 @@ if(ENABLE_MDBX)
 
     if(TARGET mdbx-static)
       set_target_properties(mdbx-static PROPERTIES SYSTEM TRUE)
+      target_compile_definitions(mdbx-static INTERFACE MDBX_BUILD_SHARED_LIBRARY=0)
+      if(WIN32)
+        target_link_libraries(mdbx-static INTERFACE psapi)
+      endif()
     endif()
     set(MDBX_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mdbx" PARENT_SCOPE)
     set(MDBX_LIBRARY_TARGET mdbx-static PARENT_SCOPE)

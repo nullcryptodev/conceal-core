@@ -18,6 +18,11 @@ namespace BoltCore
     crypto::Hash txHash;
     uint32_t outputIndex;
     uint32_t globalOutputIndex;
+    bool hasGlobalOutputIndex = false;
+    // Derivation index for generate_key_image_helper (StandardPaymentOutput key_index).
+    // When unset, legacy KeyOutput uses outputIndex.
+    uint32_t keyDerivationIndex = 0;
+    bool hasKeyDerivationIndex = false;
     uint64_t amount;
     crypto::PublicKey outputKey;
     crypto::PublicKey txPublicKey;
@@ -41,6 +46,7 @@ namespace BoltCore
     uint64_t fee;
     std::string error;
     cn::Transaction transaction;
+    std::vector<OutputInfo> spentInputs;
   };
 
   struct Balance
@@ -49,9 +55,17 @@ namespace BoltCore
     uint64_t pending;
     uint64_t lockedDeposit;
     uint64_t unlockedDeposit;
-    uint64_t accruedInterest; // Interest earned on deposits not yet withdrawn
+    uint64_t accruedInterest; // Unused; use Wallet::getAccruedInterest() for display
+    uint64_t dust;            // Un-mixable outputs below the dust threshold
     uint32_t currentHeight;   // Current blockchain height for this balance
   };
+
+  // Key outputs available before deducting a tx fee (actual minus dust).
+  // Callers subtract the fee for their operation (send/deposit: MINIMUM_FEE_V2, withdraw: MINIMUM_FEE, …).
+  inline uint64_t spendableAmountBeforeFee(const Balance &balance)
+  {
+    return balance.actual > balance.dust ? balance.actual - balance.dust : 0;
+  }
 
   struct DepositInfo
   {
@@ -59,6 +73,7 @@ namespace BoltCore
     uint64_t amount;
     uint64_t interest;
     uint32_t term;
+    uint32_t outputIndex;
     uint32_t unlockHeight;
     bool locked;
     std::string creatingTxHash;
@@ -67,8 +82,10 @@ namespace BoltCore
 
   struct FusionEstimate
   {
-    size_t fusionReadyCount;
-    size_t totalOutputCount;
+    size_t fusionReadyCount = 0;   // total outputs across buckets meeting min (aggregate)
+    size_t totalOutputCount = 0;
+    size_t readyBucketCount = 0;   // buckets with >= fusionTxMinInputCount outputs
+    size_t largestReadyBucket = 0;   // max outputs in one ready bucket (one tx uses one bucket)
   };
 
   struct SubAddress

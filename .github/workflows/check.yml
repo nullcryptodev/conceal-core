@@ -12,8 +12,11 @@ jobs:
   build-windows:
     name: Windows
     runs-on: windows-2022
+    permissions:
+      contents: write
     env:
       BOOST_ROOT: C:/local/boost_1_83_0
+      WXWIN: C:/local/wxWidgets-3.3.2
     steps:
       - uses: actions/checkout@master
 
@@ -27,10 +30,10 @@ jobs:
           echo "release_name=${release_name}" >> $env:GITHUB_OUTPUT
 
       - name: Install msbuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Restore Boost
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: restore-boost
         with:
           path: ${{env.BOOST_ROOT}}
@@ -44,13 +47,43 @@ jobs:
           (New-Object System.Net.WebClient).DownloadFile($Url, "$env:TEMP\boost.exe")
           Start-Process -Wait -FilePath "$env:TEMP\boost.exe" "/SILENT","/SP-","/SUPPRESSMSGBOXES","/DIR=${env:BOOST_ROOT}"
 
+      - name: Restore wxWidgets
+        uses: actions/cache@v5
+        id: restore-wxwidgets
+        with:
+          path: ${{ env.WXWIN }}
+          key: wxwidgets-3.3.2-msvc-vc14x-x64
+
+      - name: Install wxWidgets
+        if: steps.restore-wxwidgets.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          $wxVersion = "3.3.2"
+          $wxRoot = $env:WXWIN
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          New-Item -ItemType Directory -Force -Path $wxRoot | Out-Null
+          $baseUrl = "https://github.com/wxWidgets/wxWidgets/releases/download/v$wxVersion"
+          $archives = @(
+            "wxWidgets-$wxVersion-headers.7z",
+            "wxMSW-${wxVersion}_vc14x_x64_Dev.7z",
+            "wxMSW-${wxVersion}_vc14x_x64_ReleaseDLL.7z"
+          )
+          foreach ($archive in $archives) {
+            $dest = Join-Path $env:TEMP $archive
+            Write-Host "Downloading $archive..."
+            Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile $dest
+            & $sevenZip x $dest "-o$wxRoot" -y | Out-Null
+          }
+
       - name: Build
         shell: powershell
         id: build
         run: |
           mkdir build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+          cmake .. -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_MIGRATION_GUI=ON -DWITH_OPENCL=OFF `
+            -DwxWidgets_ROOT_DIR="$env:WXWIN" `
+            -DwxWidgets_LIB_DIR="$env:WXWIN/lib/vc14x_x64_dll"
           msbuild concealX.sln /p:Configuration=Release /m:2
 
       - name: Prepare release
@@ -59,12 +92,16 @@ jobs:
           mkdir build/conceal
           mv build/src/Release/conceald.exe build/conceal
           mv build/src/Release/concealwallet.exe build/conceal
-          mv build/src/Release/optimizer.exe build/conceal
-          mv build/src/Release/walletd.exe build/conceal
+          mv build/src/Release/conceal-wallet.exe build/conceal
+          mv build/src/Tools/Release/conceal-optimizer.exe build/conceal
+          mv build/src/Release/conceal-rpc.exe build/conceal
+          mv build/src/Tools/Release/conceald-migrate.exe build/conceal
+          mv build/src/Tools/Migration-gui/Release/conceald-migrate-gui.exe build/conceal
+          cp $env:WXWIN/lib/vc14x_x64_dll/wx*.dll build/conceal
           cp build/tests/Release/*_tests.exe build/conceal
 
       - name: Upload To GH Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.setup.outputs.release_name }}
           path: build/conceal
@@ -99,6 +136,8 @@ jobs:
   build-mingw:
     name: MinGW
     runs-on: windows-2022
+    permissions:
+      contents: write
     defaults:
       run:
         shell: msys2 {0}
@@ -116,7 +155,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pacman -U --noconfirm https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-boost-1.85.0-4-any.pkg.tar.zst
+          pacman -S --noconfirm mingw-w64-x86_64-boost mingw-w64-x86_64-boost-libs mingw-w64-x86_64-wxwidgets3.2-common mingw-w64-x86_64-wxwidgets3.2-msw
 
       - name: Prepare version
         shell: powershell
@@ -134,7 +173,7 @@ jobs:
           ls
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON -DBUILD_MIGRATION_GUI=ON -DWITH_OPENCL=OFF
           cmake --build . --config Release
 
       - name: Prepare release
@@ -143,12 +182,22 @@ jobs:
           mkdir build/conceal
           mv build/src/conceald.exe build/conceal
           mv build/src/concealwallet.exe build/conceal
-          mv build/src/optimizer.exe build/conceal
-          mv build/src/walletd.exe build/conceal
+          mv build/src/conceal-wallet.exe build/conceal
+          mv build/src/Tools/conceal-optimizer.exe build/conceal
+          mv build/src/conceal-rpc.exe build/conceal
+          mv build/src/Tools/conceald-migrate.exe build/conceal
+          mv build/src/Tools/Migration-gui/conceald-migrate-gui.exe build/conceal
+          cp /mingw64/bin/wx*.dll build/conceal
+          cp /mingw64/bin/libboost_*.dll build/conceal
+          # Runtime DLLs for artifact users without MSYS2 on PATH.
+          if [ -f /mingw64/bin/libstdc++-6.dll ]; then cp /mingw64/bin/libstdc++-6.dll build/conceal; fi
+          if [ -f /mingw64/bin/libgcc_s_seh-1.dll ]; then cp /mingw64/bin/libgcc_s_seh-1.dll build/conceal; fi
+          if [ -f /mingw64/bin/libgcc_s_dw2-1.dll ]; then cp /mingw64/bin/libgcc_s_dw2-1.dll build/conceal; fi
+          if [ -f /mingw64/bin/libwinpthread-1.dll ]; then cp /mingw64/bin/libwinpthread-1.dll build/conceal; fi
           cp build/tests/*_tests.exe build/conceal
 
       - name: Upload To GH Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.setup.outputs.release_name }}
           path: build/conceal
@@ -156,33 +205,54 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: core_tests
-        shell: powershell
+        shell: msys2 {0}
         run: |
+          set -euxo pipefail
+          export PATH="/mingw64/bin:${PATH}"
           cd build/conceal
+          pwd
+          ls -la
+          which g++ || true
+          echo "$PATH"
+          ldd ./core_tests.exe || true
           ./core_tests.exe --generate_and_play_test_data
 
       - name: difficulty_tests
-        shell: powershell
+        shell: msys2 {0}
         run: |
+          set -euxo pipefail
+          export PATH="/mingw64/bin:${PATH}"
           cp tests/Difficulty/data.txt build/conceal
           cd build/conceal
+          pwd
+          ls -la
+          ldd ./difficulty_tests.exe || true
           ./difficulty_tests.exe data.txt
 
       - name: performance_tests
-        shell: powershell
+        shell: msys2 {0}
         run: |
+          set -euxo pipefail
+          export PATH="/mingw64/bin:${PATH}"
           cd build/conceal
+          pwd
+          ls -la
+          ldd ./performance_tests.exe || true
           ./performance_tests.exe
 
       - name: unit_tests
-        shell: powershell
+        shell: msys2 {0}
         run: |
-          cd build/tests
+          set -euxo pipefail
+          export PATH="/mingw64/bin:${PATH}"
+          cd build
           ctest -R UnitTests --output-on-failure
 
   build-ubuntu22:
     name: Ubuntu 22.04
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@master
 
@@ -198,13 +268,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make cmake gcc g++ libboost-all-dev
+          sudo apt-get install -y libwxgtk3.2-gtk3-dev || sudo apt-get install -y libwxgtk3.0-gtk3-dev
 
       - name: Build
         id: build
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON -DWITH_OPENCL=OFF
           make -j2
 
       - name: Prepare release
@@ -212,12 +283,15 @@ jobs:
           mkdir build/conceal
           mv build/src/conceald build/conceal
           mv build/src/concealwallet build/conceal
-          mv build/src/optimizer build/conceal
-          mv build/src/walletd build/conceal
+          mv build/src/conceal-wallet build/conceal
+          mv build/src/Tools/conceal-optimizer build/conceal
+          mv build/src/conceal-rpc build/conceal
+          mv build/src/Tools/conceald-migrate build/conceal
+          mv build/src/Tools/Migration-gui/conceald-migrate-gui build/conceal
           cp build/tests/*_tests build/conceal
 
       - name: Upload To GH Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.setup.outputs.release_name }}
           path: build/conceal
@@ -253,6 +327,8 @@ jobs:
   build-ubuntu24:
     name: Ubuntu 24.04
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@master
 
@@ -268,13 +344,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make cmake gcc g++ libboost-all-dev
+          sudo apt-get install -y libgtk-3-dev libwxgtk3.2-dev wx3.2-headers wx-common
 
       - name: Build
         id: build
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON -DWITH_OPENCL=OFF
           make -j2
 
       - name: Prepare release
@@ -282,12 +359,15 @@ jobs:
           mkdir build/conceal
           mv build/src/conceald build/conceal
           mv build/src/concealwallet build/conceal
-          mv build/src/optimizer build/conceal
-          mv build/src/walletd build/conceal
+          mv build/src/conceal-wallet build/conceal
+          mv build/src/Tools/conceal-optimizer build/conceal
+          mv build/src/conceal-rpc build/conceal
+          mv build/src/Tools/conceald-migrate build/conceal
+          mv build/src/Tools/Migration-gui/conceald-migrate-gui build/conceal
           cp build/tests/*_tests build/conceal
 
       - name: Upload To GH Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.setup.outputs.release_name }}
           path: build/conceal
@@ -323,6 +403,8 @@ jobs:
   build-ubuntu22-clang:
     name: Ubuntu 22.04 clang
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@master
 
@@ -338,13 +420,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make cmake clang libboost-all-dev
+          sudo apt-get install -y libwxgtk3.2-gtk3-dev || sudo apt-get install -y libwxgtk3.0-gtk3-dev
 
       - name: Build
         id: build
         run: |
           mkdir build
           cd build
-          CC=clang CXX=clang++ cmake .. -DCMAKE_BUILD_TYPE=Release  -DBUILD_TESTS=ON -DSTATIC=ON
+          CC=clang CXX=clang++ cmake .. -DCMAKE_BUILD_TYPE=Release  -DBUILD_TESTS=ON -DSTATIC=ON -DWITH_OPENCL=OFF
           make -j2
 
       - name: Prepare release
@@ -352,12 +435,15 @@ jobs:
           mkdir build/conceal
           mv build/src/conceald build/conceal
           mv build/src/concealwallet build/conceal
-          mv build/src/optimizer build/conceal
-          mv build/src/walletd build/conceal
+          mv build/src/conceal-wallet build/conceal
+          mv build/src/Tools/conceal-optimizer build/conceal
+          mv build/src/conceal-rpc build/conceal
+          mv build/src/Tools/conceald-migrate build/conceal
+          mv build/src/Tools/Migration-gui/conceald-migrate-gui build/conceal
           cp build/tests/*_tests build/conceal
 
       - name: Upload To GH Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.setup.outputs.release_name }}
           path: build/conceal
@@ -392,28 +478,31 @@ jobs:
 
   build-macos:
     name: macOS
-    runs-on: macos-13
+    runs-on: macos-15-intel
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@master
 
       - name: Prepare version
         id: setup
         run: |
-          os=macos-13
+          os=macos-15-intel
           ccx_version=${GITHUB_SHA::7}
           release_name=ccx-cli-"$os"-dev-"$ccx_version"
           echo "release_name=${release_name}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: |
-          brew install boost@1.85
+          brew install boost wxwidgets
+          brew list --versions boost
 
       - name: Build
         id: build
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON -DBOOST_ROOT=/usr/local/opt/boost@1.85
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DSTATIC=ON -DWITH_OPENCL=OFF -DBOOST_ROOT="$(brew --prefix boost)"
           make -j2
 
       - name: Prepare release
@@ -421,12 +510,15 @@ jobs:
           mkdir build/conceal
           mv build/src/conceald build/conceal
           mv build/src/concealwallet build/conceal
-          mv build/src/optimizer build/conceal
-          mv build/src/walletd build/conceal
+          mv build/src/conceal-wallet build/conceal
+          mv build/src/Tools/conceal-optimizer build/conceal
+          mv build/src/conceal-rpc build/conceal
+          mv build/src/Tools/conceald-migrate build/conceal
+          mv build/src/Tools/Migration-gui/conceald-migrate-gui build/conceal
           cp build/tests/*_tests build/conceal
 
       - name: Upload To GH Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.setup.outputs.release_name }}
           path: build/conceal

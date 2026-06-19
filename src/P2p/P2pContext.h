@@ -10,13 +10,9 @@
 #include <chrono>
 #include <vector>
 
-#include <System/ContextGroup.h>
-#include <System/Dispatcher.h>
-#include <System/Event.h>
-#include <System/TcpConnection.h>
-#include <System/Timer.h>
+#include "PlatformSystemHeaders.h"
 
-#include "CryptoNoteConfig.h"
+#include "../CryptoNoteConfig.h"
 #include "LevinProtocol.h"
 #include "P2pInterfaces.h"
 #include "P2pProtocolDefinitions.h"
@@ -61,27 +57,27 @@ public:
 
 private:
 
-  uint8_t version = 0;
-  const bool incoming;
-  const NetworkAddress remoteAddress;
-  PeerIdType peerId = 0;
-  uint16_t peerPort = 0;
+  uint8_t m_version = 0;
+  const bool m_incoming;
+  const NetworkAddress m_remoteAddress;
+  PeerIdType m_peerId = 0;
+  uint16_t m_peerPort = 0;
 
-  platform_system::Dispatcher& dispatcher;
-  platform_system::ContextGroup contextGroup;
-  const TimePoint timeStarted;
-  bool stopped = false;
-  TimePoint lastReadTime;
+  platform_system::Dispatcher& m_dispatcher;
+  platform_system::ContextGroup m_contextGroup;
+  const TimePoint m_timeStarted;
+  bool m_stopped = false;
+  TimePoint m_lastReadTime;
 
   // timed sync info
-  const std::chrono::nanoseconds timedSyncInterval;
-  const CORE_SYNC_DATA& timedSyncData;
-  platform_system::Timer timedSyncTimer;
-  platform_system::Event timedSyncFinished;
+  const std::chrono::nanoseconds m_timedSyncInterval;
+  const CORE_SYNC_DATA& m_timedSyncData;
+  platform_system::Timer m_timedSyncTimer;
+  platform_system::Event m_timedSyncFinished;
 
-  platform_system::TcpConnection connection;
-  platform_system::Event writeEvent;
-  platform_system::Event readEvent;
+  platform_system::TcpConnection m_connection;
+  platform_system::Event m_writeEvent;
+  platform_system::Event m_readEvent;
 
   void timedSyncLoop();
 };

@@ -54,6 +54,9 @@ public:
   virtual void isSynchronized(bool& syncStatus, const Callback& callback) override { callback(std::error_code()); };
   virtual void getMultisignatureOutputByGlobalIndex(uint64_t amount, uint32_t gindex, cn::MultisignatureOutput& out, const Callback& callback) override { callback(std::error_code()); }
 
+  virtual std::vector<crypto::Hash> getPoolTransactions() override { return {}; }
+  virtual bool getTransactionSync(const crypto::Hash& txHash, cn::Transaction& tx) override { return false; }
+
   void updateObservers();
 
   tools::ObserverManager<cn::INodeObserver> observerManager;
@@ -92,6 +95,9 @@ public:
   virtual void getPoolTransactions(uint64_t timestampBegin, uint64_t timestampEnd, uint32_t transactionsNumberLimit, std::vector<cn::TransactionDetails>& transactions, uint64_t& transactionsNumberWithinTimestamps, const Callback& callback)  override;
   virtual void isSynchronized(bool& syncStatus, const Callback& callback) override;
   virtual void getMultisignatureOutputByGlobalIndex(uint64_t amount, uint32_t gindex, cn::MultisignatureOutput& out, const Callback& callback) override;
+
+  virtual std::vector<crypto::Hash> getPoolTransactions() override;
+  virtual bool getTransactionSync(const crypto::Hash& txHash, cn::Transaction& tx) override;
 
 
   virtual void startAlternativeChain(uint32_t height);

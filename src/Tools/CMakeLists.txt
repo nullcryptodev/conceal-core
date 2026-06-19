@@ -50,6 +50,9 @@ set_property(TARGET MigrationTool PROPERTY OUTPUT_NAME "conceald-migrate")
 # HealthCheck — standalone daemon health monitor
 add_executable(HealthCheck HealthCheck.cpp)
 set_property(TARGET HealthCheck PROPERTY OUTPUT_NAME "conceal-health")
+if(WIN32)
+  target_link_libraries(HealthCheck ws2_32)
+endif()
 
 # Migration GUI (optional, requires wxWidgets)
 add_subdirectory(Migration-gui)

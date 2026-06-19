@@ -3,16 +3,61 @@
 
 #include "Tui.h"
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <exception>
+#include <thread>
+
 #if defined(_WIN32)
 #include <conio.h>
 #else
 #include <termios.h>
 #include <unistd.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
 #endif
 
 namespace Tui
 {
+
+#if !defined(_WIN32)
+  namespace
+  {
+    int queryTerminalDimension(bool height)
+    {
+#if defined(TIOCGWINSZ)
+      struct winsize ws {};
+      if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
+      {
+        const int dim = height ? ws.ws_row : ws.ws_col;
+        if (dim >= 1)
+          return dim;
+      }
+#endif
+      const char *env = height ? std::getenv("LINES") : std::getenv("COLUMNS");
+      return parseTerminalDimension(env, height ? 24 : 80);
+    }
+  }
+#endif
+
+  int terminalWidth()
+  {
+#if defined(_WIN32)
+    return parseTerminalDimension(std::getenv("COLUMNS"), 80);
+#else
+    return queryTerminalDimension(false);
+#endif
+  }
+
+  int terminalHeight()
+  {
+#if defined(_WIN32)
+    return parseTerminalDimension(std::getenv("LINES"), 24);
+#else
+    return queryTerminalDimension(true);
+#endif
+  }
 
 #if defined(_WIN32)
 
@@ -81,17 +126,17 @@ namespace Tui
           switch (seq[1])
           {
           case 'A':
-            return 1000; // Up
+            return KEY_UP;
           case 'B':
-            return 1001; // Down
+            return KEY_DOWN;
           case 'C':
-            return 1002; // Right
+            return KEY_RIGHT;
           case 'D':
-            return 1003; // Left
+            return KEY_LEFT;
           case 'H':
-            return 1004; // Home
+            return KEY_HOME;
           case 'F':
-            return 1005; // End
+            return KEY_END;
           }
         }
       }
@@ -101,5 +146,45 @@ namespace Tui
   }
 
 #endif
+
+  void runWithStatusSpinner(const std::string &message, const std::function<void()> &work)
+  {
+    std::atomic<bool> done{false};
+    std::exception_ptr error;
+    std::thread worker([&]()
+                       {
+      try
+      {
+        work();
+      }
+      catch (...)
+      {
+        error = std::current_exception();
+      }
+      done = true; });
+
+    static const char frames[] = {'|', '/', '-', '\\'};
+    size_t frame = 0;
+    const std::string line = std::string(1, frames[0]) + " " + message;
+
+    while (!done.load())
+    {
+      const int height = terminalHeight();
+      const int width = terminalWidth();
+      const int row = std::max(1, height / 2);
+      const int col = std::max(1, (width - static_cast<int>(line.size())) / 2);
+      const char spinner = frames[frame % (sizeof(frames) / sizeof(frames[0]))];
+      ++frame;
+
+      std::cout << clearScreen() << hideCursor() << cursorTo(row, col)
+                << dim() << spinner << reset() << " " << message << std::flush;
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+
+    worker.join();
+    if (error)
+      std::rethrow_exception(error);
+  }
 
 } // namespace Tui

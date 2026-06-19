@@ -31,6 +31,7 @@
 using namespace logging;
 
 #undef ERROR
+#include "Common/WindowsMacroUndef.h"
 
 namespace cn
 {

@@ -30,17 +30,17 @@ struct TcpConnectorContextExt : public OperationContext {
 
 }
 
-TcpConnector::TcpConnector() : dispatcher(nullptr) {
+TcpConnector::TcpConnector() : m_dispatcher(nullptr) {
 }
 
-TcpConnector::TcpConnector(Dispatcher& dispatcher) : dispatcher(&dispatcher), context(nullptr) {
+TcpConnector::TcpConnector(Dispatcher& dispatcher) : m_dispatcher(&dispatcher), m_context(nullptr) {
 }
 
-TcpConnector::TcpConnector(TcpConnector&& other) : dispatcher(other.dispatcher) {
-  if (other.dispatcher != nullptr) {
-    assert(other.context == nullptr);
-    context = nullptr;
-    other.dispatcher = nullptr;
+TcpConnector::TcpConnector(TcpConnector&& other) : m_dispatcher(other.m_dispatcher) {
+  if (other.m_dispatcher != nullptr) {
+    assert(other.m_context == nullptr);
+    m_context = nullptr;
+    other.m_dispatcher = nullptr;
   }
 }
 
@@ -48,20 +48,20 @@ TcpConnector::~TcpConnector() {
 }
 
 TcpConnector& TcpConnector::operator=(TcpConnector&& other) {
-  dispatcher = other.dispatcher;
-  if (other.dispatcher != nullptr) {
-    assert(other.context == nullptr);
-    context = nullptr;
-    other.dispatcher = nullptr;
+  m_dispatcher = other.m_dispatcher;
+  if (other.m_dispatcher != nullptr) {
+    assert(other.m_context == nullptr);
+    m_context = nullptr;
+    other.m_dispatcher = nullptr;
   }
 
   return *this;
 }
 
 TcpConnection TcpConnector::connect(const Ipv4Address& address, uint16_t port) {
-  assert(dispatcher != nullptr);
-  assert(context == nullptr);
-  if (dispatcher->interrupted()) {
+  assert(m_dispatcher != nullptr);
+  assert(m_context == nullptr);
+  if (m_dispatcher->interrupted()) {
     throw InterruptedException();
   }
 
@@ -92,7 +92,7 @@ TcpConnection TcpConnector::connect(const Ipv4Address& address, uint16_t port) {
             ContextPair contextPair;
             TcpConnectorContextExt connectorContext;
             connectorContext.interrupted = false;
-            connectorContext.context = dispatcher->getCurrentContext();
+            connectorContext.context = m_dispatcher->getCurrentContext();
             connectorContext.connection = connection;
 
             contextPair.readContext = nullptr;
@@ -101,35 +101,35 @@ TcpConnection TcpConnector::connect(const Ipv4Address& address, uint16_t port) {
             epoll_event connectEvent;
             connectEvent.events = EPOLLOUT | EPOLLRDHUP | EPOLLERR | EPOLLONESHOT;
             connectEvent.data.ptr = &contextPair;
-            if (epoll_ctl(dispatcher->getEpoll(), EPOLL_CTL_ADD, connection, &connectEvent) == -1) {
+            if (epoll_ctl(m_dispatcher->getEpoll(), EPOLL_CTL_ADD, connection, &connectEvent) == -1) {
               message = "epoll_ctl failed, " + lastErrorMessage();
             } else {
-              context = &connectorContext;
-              dispatcher->getCurrentContext()->interruptProcedure = [&] {
-                TcpConnectorContextExt* connectorContext1 = static_cast<TcpConnectorContextExt*>(context);
+              m_context = &connectorContext;
+              m_dispatcher->getCurrentContext()->interruptProcedure = [&] {
+                TcpConnectorContextExt* connectorContext1 = static_cast<TcpConnectorContextExt*>(m_context);
                 if (!connectorContext1->interrupted) {
                   if (close(connectorContext1->connection) == -1) {
                     throw std::runtime_error("TcpListener::stop, close failed, " + lastErrorMessage());
                   }
 
                   connectorContext1->interrupted = true;
-                  dispatcher->pushContext(connectorContext1->context);
+                  m_dispatcher->pushContext(connectorContext1->context);
                 }
               };
 
-              dispatcher->dispatch();
-              dispatcher->getCurrentContext()->interruptProcedure = nullptr;
-              assert(dispatcher != nullptr);
-              assert(connectorContext.context == dispatcher->getCurrentContext());
+              m_dispatcher->dispatch();
+              m_dispatcher->getCurrentContext()->interruptProcedure = nullptr;
+              assert(m_dispatcher != nullptr);
+              assert(connectorContext.context == m_dispatcher->getCurrentContext());
               assert(contextPair.readContext == nullptr);
-              assert(context == &connectorContext);
-              context = nullptr;
+              assert(m_context == &connectorContext);
+              m_context = nullptr;
               connectorContext.context = nullptr;
               if (connectorContext.interrupted) {
                 throw InterruptedException();
               }
 
-              if (epoll_ctl(dispatcher->getEpoll(), EPOLL_CTL_DEL, connection, NULL) == -1) {
+              if (epoll_ctl(m_dispatcher->getEpoll(), EPOLL_CTL_DEL, connection, NULL) == -1) {
                 message = "epoll_ctl failed, " + lastErrorMessage();
               } else {
                 if((connectorContext.events & (EPOLLERR | EPOLLHUP)) != 0) {
@@ -148,14 +148,14 @@ TcpConnection TcpConnector::connect(const Ipv4Address& address, uint16_t port) {
                   if (retval != 0) {
                     message = "getsockopt failed, " + lastErrorMessage();
                   } else {
-                    return TcpConnection(*dispatcher, connection);
+                    return TcpConnection(*m_dispatcher, connection);
                   }
                 }
               }
             }
           }
         } else {
-          return TcpConnection(*dispatcher, connection);
+          return TcpConnection(*m_dispatcher, connection);
         }
       }
     }

@@ -32,9 +32,9 @@ private:
   friend class TcpConnector;
   friend class TcpListener;
   
-  Dispatcher* dispatcher;
-  int connection;
-  ContextPair contextPair;
+  Dispatcher* m_dispatcher;
+  int m_connection;
+  ContextPair m_contextPair;
 
   TcpConnection(Dispatcher& dispatcher, int socket);
 };

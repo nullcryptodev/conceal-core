@@ -7,11 +7,11 @@ target_link_libraries(Sidechain
     System
     CryptoNoteCore
     Serialization
-    -Wl,--start-group
+    ${CN_LINK_GROUP_START}
         Common
         Logging
         crypto
-    -Wl,--end-group
+    ${CN_LINK_GROUP_END}
     ${Boost_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )

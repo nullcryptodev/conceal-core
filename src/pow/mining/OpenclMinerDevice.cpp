@@ -35,7 +35,9 @@ constexpr size_t kStateUlongs = 25;
 constexpr size_t kMaxHashingBlobBytes = 128;
 } // namespace
 
-#ifdef CONCEAL_WITH_OPENCL
+#ifndef CONCEAL_WITH_OPENCL
+struct OpenclMinerDevice::OclState {};
+#else
 
 struct OpenclMinerDevice::OclState
 {

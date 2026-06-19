@@ -25,9 +25,9 @@ public:
   void sleep(std::chrono::nanoseconds duration);
 
 private:
-  Dispatcher* dispatcher;
-  void* context;
-  int timer;
+  Dispatcher* m_dispatcher;
+  void* m_context;
+  int m_timer;
 };
 
 }

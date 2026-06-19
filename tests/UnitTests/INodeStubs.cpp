@@ -10,6 +10,7 @@
 #include "Wallet/WalletErrors.h"
 
 #include <functional>
+#include <limits>
 #include <thread>
 #include <iterator>
 #include <cassert>
@@ -724,4 +725,18 @@ void INodeTrivialRefreshStub::doGetOutByMSigGIndex(uint64_t amount, uint32_t gin
   } else {
     callback(std::make_error_code(std::errc::invalid_argument));
   }
+}
+
+std::vector<crypto::Hash> INodeTrivialRefreshStub::getPoolTransactions()
+{
+  std::vector<crypto::Hash> hashes;
+  uint64_t count = 0;
+  m_blockchainGenerator.getPoolTransactionIdsByTimestamp(0, std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint32_t>::max(), hashes, count);
+  return hashes;
+}
+
+bool INodeTrivialRefreshStub::getTransactionSync(const crypto::Hash& txHash, cn::Transaction& tx)
+{
+  return m_blockchainGenerator.getTransactionByHash(txHash, tx, false)
+      || m_blockchainGenerator.getTransactionByHash(txHash, tx, true);
 }

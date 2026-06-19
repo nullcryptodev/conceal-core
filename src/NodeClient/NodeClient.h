@@ -5,6 +5,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -32,6 +33,11 @@ namespace NodeClient
     bool init();
     bool shutdown() override;
     bool isConnected() const;
+
+    // Connect to daemon (full timeout). Safe to call repeatedly.
+    bool connectToDaemon();
+
+    std::string endpoint() const;
 
     // ── cn::INode interface ─────────────────────────────────────────────
     bool addObserver(cn::INodeObserver *observer) override;
@@ -100,8 +106,25 @@ namespace NodeClient
     void getBlocksByHeight(const std::vector<uint32_t> &blockHeights,
                            std::vector<std::vector<cn::BlockDetails>> &blocks);
 
+    // Full txs at a block height (for daemon-ahead-of-MDBX gap scan).
+    bool getTransactionsAtHeight(uint32_t height,
+                                 std::vector<cn::Transaction> &transactions,
+                                 std::vector<crypto::Hash> &hashes,
+                                 std::vector<std::vector<uint32_t>> *outputGlobalIndexes = nullptr);
+
+    // Mined tx lookup with block height (f_transaction_json).
+    bool fetchTransactionDetails(const crypto::Hash &txHash,
+                                 cn::Transaction &transaction,
+                                 uint32_t &blockHeight,
+                                 bool &inBlock);
+
+    // Generic daemon JSON-RPC call (used by BoltRPC::SyncManager polling strategy).
+    std::string callDaemonMethod(const std::string &method, const std::string &paramsJson);
+
   private:
-    std::string jsonRpcCall(const std::string &method, const std::string &paramsJson);
+    std::string jsonRpcCall(const std::string &method, const std::string &paramsJson,
+                            int connectTimeoutMs = 5000, int recvTimeoutMs = 10000);
+    bool refreshBlockHeight(int connectTimeoutMs = 5000, int recvTimeoutMs = 10000);
     std::string m_host;
     uint16_t m_port;
     std::atomic<bool> m_connected{false};
@@ -111,6 +134,7 @@ namespace NodeClient
     uint32_t m_lastKnownBlockHeight = 0;
     uint64_t m_lastLocalBlockTimestamp = 0;
     size_t m_peerCount = 0;
+    std::chrono::steady_clock::time_point m_lastHeightRefresh{};
   };
 
 } // namespace NodeClient

@@ -28,9 +28,9 @@ public:
   TcpConnection accept();
 
 private:
-  Dispatcher* dispatcher;
-  void* context;
-  int listener;
+  Dispatcher* m_dispatcher;
+  void* m_context;
+  int m_listener;
 };
 
 }

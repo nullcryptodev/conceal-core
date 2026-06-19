@@ -16,25 +16,25 @@ namespace platform_system {
 template<typename T> class OperationTimeout {
 public:
   OperationTimeout(Dispatcher& dispatcher, T& object, std::chrono::nanoseconds timeout) :
-    object(object), timerContext(dispatcher), timeoutTimer(dispatcher) {
-    timerContext.spawn([this, timeout]() {
+    m_object(object), m_timerContext(dispatcher), m_timeoutTimer(dispatcher) {
+    m_timerContext.spawn([this, timeout]() {
       try {
-        timeoutTimer.sleep(timeout);
-        timerContext.interrupt();
+        m_timeoutTimer.sleep(timeout);
+        m_timerContext.interrupt();
       } catch (std::exception&) {
       }
     });
   }
 
   ~OperationTimeout() {
-    timerContext.interrupt();
-    timerContext.wait();
+    m_timerContext.interrupt();
+    m_timerContext.wait();
   }
 
 private:
-  T& object;
-  ContextGroup timerContext;
-  Timer timeoutTimer;
+  T& m_object;
+  ContextGroup m_timerContext;
+  Timer m_timeoutTimer;
 };
 
 }

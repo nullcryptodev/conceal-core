@@ -33,7 +33,8 @@ namespace BoltSync
 
   bool deserializeBlockEntry(const cn::BinaryArray &rawEntry,
                              cn::Block &block,
-                             std::vector<cn::Transaction> &transactions);
+                             std::vector<cn::Transaction> &transactions,
+                             std::vector<std::vector<uint32_t>> *globalIndexesPerTx = nullptr);
 
   void scanSingleBlock(uint32_t height, ScanContext &ctx);
 

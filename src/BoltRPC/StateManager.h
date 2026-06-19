@@ -62,7 +62,10 @@ namespace BoltRPC
   class StateManager
   {
   public:
-    StateManager(const std::string &dataDir);
+    // dataDir/wallet_state.bin
+    explicit StateManager(const std::string &dataDir);
+    // exact file path (e.g. from --state)
+    StateManager(const std::string &filePath, bool pathIsFullFile);
     ~StateManager();
 
     // ── Load / Save ────────────────────────────────────────────────────────
@@ -85,7 +88,7 @@ namespace BoltRPC
     size_t fileSize() const;
 
   private:
-    std::string m_dataDir;
+    std::string m_filePath;
     mutable std::mutex m_mutex;
   };
 

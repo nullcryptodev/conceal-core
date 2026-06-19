@@ -169,8 +169,9 @@ TEST(EncryptedMemo, authenticated_roundTrip)
   std::vector<uint8_t> ciphertextWithTag = EncryptedMemo::encryptAuthenticated(plaintext, derivation, 7);
   EXPECT_FALSE(ciphertextWithTag.empty());
 
-  auto [decrypted, isValid] = EncryptedMemo::decryptAuthenticated(ciphertextWithTag, derivation, 7);
-  EXPECT_TRUE(isValid);
-  EXPECT_EQ(decrypted.size(), plaintext.size());
-  EXPECT_EQ(std::memcmp(decrypted.data(), plaintext.data(), plaintext.size()), 0);
+  std::pair<std::vector<uint8_t>, bool> result =
+      EncryptedMemo::decryptAuthenticated(ciphertextWithTag, derivation, 7);
+  EXPECT_TRUE(result.second);
+  EXPECT_EQ(result.first.size(), plaintext.size());
+  EXPECT_EQ(std::memcmp(result.first.data(), plaintext.data(), plaintext.size()), 0);
 }

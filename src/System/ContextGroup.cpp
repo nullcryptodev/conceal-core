@@ -10,79 +10,79 @@
 
 namespace platform_system {
 
-ContextGroup::ContextGroup(Dispatcher& dispatcher) : dispatcher(&dispatcher) {
-  contextGroup.firstContext = nullptr;
+ContextGroup::ContextGroup(Dispatcher& dispatcher) : m_dispatcher(&dispatcher) {
+  m_contextGroup.firstContext = nullptr;
 }
 
-ContextGroup::ContextGroup(ContextGroup&& other) : dispatcher(other.dispatcher) {
-  if (dispatcher != nullptr) {
-    assert(other.contextGroup.firstContext == nullptr);
-    contextGroup.firstContext = nullptr;
-    other.dispatcher = nullptr;
+ContextGroup::ContextGroup(ContextGroup&& other) : m_dispatcher(other.m_dispatcher) {
+  if (m_dispatcher != nullptr) {
+    assert(other.m_contextGroup.firstContext == nullptr);
+    m_contextGroup.firstContext = nullptr;
+    other.m_dispatcher = nullptr;
   }
 }
 
 ContextGroup::~ContextGroup() {
-  if (dispatcher != nullptr) {
+  if (m_dispatcher != nullptr) {
     interrupt();
     wait();
   }
 }
 
 ContextGroup& ContextGroup::operator=(ContextGroup&& other) {
-  assert(dispatcher == nullptr || contextGroup.firstContext == nullptr);
-  dispatcher = other.dispatcher;
-  if (dispatcher != nullptr) {
-    assert(other.contextGroup.firstContext == nullptr);
-    contextGroup.firstContext = nullptr;
-    other.dispatcher = nullptr;
+  assert(m_dispatcher == nullptr || m_contextGroup.firstContext == nullptr);
+  m_dispatcher = other.m_dispatcher;
+  if (m_dispatcher != nullptr) {
+    assert(other.m_contextGroup.firstContext == nullptr);
+    m_contextGroup.firstContext = nullptr;
+    other.m_dispatcher = nullptr;
   }
 
   return *this;
 }
 
 void ContextGroup::interrupt() {
-  assert(dispatcher != nullptr);
-  for (NativeContext* context = contextGroup.firstContext; context != nullptr; context = context->groupNext) {
-    dispatcher->interrupt(context);
+  assert(m_dispatcher != nullptr);
+  for (NativeContext* context = m_contextGroup.firstContext; context != nullptr; context = context->groupNext) {
+    m_dispatcher->interrupt(context);
   }
 }
 
 void ContextGroup::spawn(std::function<void()>&& procedure) {
-  assert(dispatcher != nullptr);
-  NativeContext& context = dispatcher->getReusableContext();
-  if (contextGroup.firstContext != nullptr) {
-    context.groupPrev = contextGroup.lastContext;
-    assert(contextGroup.lastContext->groupNext == nullptr);
-    contextGroup.lastContext->groupNext = &context;
+  assert(m_dispatcher != nullptr);
+  NativeContext& context = m_dispatcher->getReusableContext();
+  if (m_contextGroup.firstContext != nullptr) {
+    context.groupPrev = m_contextGroup.lastContext;
+    assert(m_contextGroup.lastContext->groupNext == nullptr);
+    m_contextGroup.lastContext->groupNext = &context;
   } else {
     context.groupPrev = nullptr;
-    contextGroup.firstContext = &context;
-    contextGroup.firstWaiter = nullptr;
+    m_contextGroup.firstContext = &context;
+    m_contextGroup.firstWaiter = nullptr;
   }
 
   context.interrupted = false;
-  context.group = &contextGroup;
+  context.group = &m_contextGroup;
   context.groupNext = nullptr;
   context.procedure = std::move(procedure);
-  contextGroup.lastContext = &context;
-  dispatcher->pushContext(&context);
+  m_contextGroup.lastContext = &context;
+  m_dispatcher->pushContext(&context);
 }
 
 void ContextGroup::wait() {
-  if (contextGroup.firstContext != nullptr) {
-    NativeContext* context = dispatcher->getCurrentContext();
+  if (m_contextGroup.firstContext != nullptr) {
+    NativeContext* context = m_dispatcher->getCurrentContext();
     context->next = nullptr;
-    if (contextGroup.firstWaiter != nullptr) {
-      assert(contextGroup.lastWaiter->next == nullptr);
-      contextGroup.lastWaiter->next = context;
+    if (m_contextGroup.firstWaiter != nullptr) {
+      assert(m_contextGroup.lastWaiter->next == nullptr);
+      m_contextGroup.lastWaiter->next = context;
     } else {
-      contextGroup.firstWaiter = context;
+      m_contextGroup.firstWaiter = context;
     }
 
-    contextGroup.lastWaiter = context;
-    dispatcher->dispatch();
-    assert(context == dispatcher->getCurrentContext());
+    m_contextGroup.lastWaiter = context;
+    m_dispatcher->dispatch();
+    assert(context == m_dispatcher->getCurrentContext());
   }
 }
 

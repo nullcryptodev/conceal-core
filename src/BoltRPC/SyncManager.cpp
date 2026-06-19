@@ -207,6 +207,16 @@ namespace BoltRPC
     m_triggerSync.store(true);
   }
 
+  void SyncManager::seedScannedHeight(uint32_t height)
+  {
+    const uint32_t current = m_lastScannedHeight.load();
+    if (height > current)
+    {
+      m_lastScannedHeight.store(height);
+      saveProgress();
+    }
+  }
+
   // ─── Main Loop ─────────────────────────────────────────────────────────────
 
   void SyncManager::runLoop()
@@ -278,9 +288,10 @@ namespace BoltRPC
       return;
 
     // Step 3: Sync post-fork range by scanning full blocks
+    std::vector<crypto::KeyImage> spentKIs;
     if (chainHeight >= forkHeight)
     {
-      scanPostForkBlocks(std::max(forkHeight, 0u), chainHeight, progress, allOwned);
+      scanPostForkBlocks(std::max(forkHeight, 0u), chainHeight, progress, allOwned, spentKIs);
     }
 
     progress.ownedOutputs = static_cast<uint32_t>(allOwned.size());
@@ -288,11 +299,10 @@ namespace BoltRPC
     if (m_onProgress)
       m_onProgress(progress);
 
-    // Report outputs
-    if (m_onOutputs && !allOwned.empty())
+    // Report outputs + spent key images
+    if (m_onOutputs && (!allOwned.empty() || !spentKIs.empty()))
     {
-      std::vector<crypto::KeyImage> empty;
-      m_onOutputs(allOwned, empty);
+      m_onOutputs(allOwned, spentKIs);
     }
 
     m_lastScannedHeight.store(chainHeight);
@@ -312,7 +322,22 @@ namespace BoltRPC
     {
       std::vector<cn::BlockFilterRecord> dummy;
       if (!callGetFilterRecords(0, 0, dummy, chainHeight))
+      {
+        // get_filter_records is unavailable — this is an old-style daemon that
+        // does not implement the BoltRPC filter endpoint.  Block scanning falls
+        // back to scanDaemonGapBlocks (getTransactionsAtHeight) in SyncEngine.
+        // Log once so the operator knows which path is active.
+        if (!m_loggedOldDaemon && m_onProgress)
+        {
+          m_loggedOldDaemon = true;
+          SyncProgress p;
+          p.errorMessage = "get_filter_records unavailable — old daemon detected; "
+                           "falling back to getTransactionsAtHeight via scanDaemonGapBlocks";
+          p.phase = SyncProgress::COMPLETE;
+          m_onProgress(p);
+        }
         return;
+      }
     }
 
     if (chainHeight <= walletHeight)
@@ -334,10 +359,11 @@ namespace BoltRPC
     }
 
     // Post-fork portion (if any)
+    std::vector<crypto::KeyImage> spentKIs;
     if (chainHeight >= forkHeight)
     {
       uint32_t postForkStart = std::max(startHeight, forkHeight);
-      scanPostForkBlocks(postForkStart, chainHeight, progress, allOwned);
+      scanPostForkBlocks(postForkStart, chainHeight, progress, allOwned, spentKIs);
     }
 
     progress.ownedOutputs = static_cast<uint32_t>(allOwned.size());
@@ -345,10 +371,9 @@ namespace BoltRPC
     if (m_onProgress)
       m_onProgress(progress);
 
-    if (m_onOutputs && !allOwned.empty())
+    if (m_onOutputs && (!allOwned.empty() || !spentKIs.empty()))
     {
-      std::vector<crypto::KeyImage> empty;
-      m_onOutputs(allOwned, empty);
+      m_onOutputs(allOwned, spentKIs);
     }
 
     m_lastScannedHeight.store(chainHeight);
@@ -792,7 +817,8 @@ namespace BoltRPC
 
   void SyncManager::scanPostForkBlocks(uint32_t startHeight, uint32_t endHeight,
                                        SyncProgress &progress,
-                                       std::vector<OutputInfo> &owned)
+                                       std::vector<OutputInfo> &owned,
+                                       std::vector<crypto::KeyImage> &spentKIs)
   {
     if (startHeight > endHeight)
       return;
@@ -859,11 +885,15 @@ namespace BoltRPC
               info.txHash = fo.txHash;
               info.amount = fo.amount;
               info.outputIndex = fo.outputIndex;
+              info.globalOutputIndex = fo.globalOutputIndex;
+              info.hasGlobalOutputIndex = fo.hasGlobalOutputIndex;
               info.outputKey = fo.outputKey;
               info.txPublicKey = fo.txPublicKey;
               info.spent = false;
               info.isDeposit = fo.isDeposit;
               info.term = fo.term;
+              info.keyDerivationIndex = fo.keyDerivationIndex;
+              info.hasKeyDerivationIndex = fo.hasKeyDerivationIndex;
               owned.push_back(info);
             }
           }
@@ -896,13 +926,25 @@ namespace BoltRPC
               info.txHash = fo.txHash;
               info.amount = fo.amount;
               info.outputIndex = fo.outputIndex;
+              info.globalOutputIndex = fo.globalOutputIndex;
+              info.hasGlobalOutputIndex = fo.hasGlobalOutputIndex;
               info.outputKey = fo.outputKey;
               info.txPublicKey = fo.txPublicKey;
               info.spent = false;
               info.isDeposit = fo.isDeposit;
               info.term = fo.term;
+              info.keyDerivationIndex = fo.keyDerivationIndex;
+              info.hasKeyDerivationIndex = fo.hasKeyDerivationIndex;
               owned.push_back(info);
             }
+          }
+
+          // Collect key images from transaction inputs for spend detection.
+          // The caller matches these against known wallet outputs.
+          for (const auto &input : tx.inputs)
+          {
+            if (input.type() == typeid(cn::KeyInput))
+              spentKIs.push_back(boost::get<cn::KeyInput>(input).keyImage);
           }
         }
       }

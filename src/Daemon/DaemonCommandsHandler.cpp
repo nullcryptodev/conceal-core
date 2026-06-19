@@ -150,7 +150,7 @@ bool DaemonCommandsHandler::print_pl(const std::vector<std::string> &args)
     logger(logging::ERROR) << "Usage: \"print_pl\"";
     return true;
   }
-  m_srv.log_peerlist();
+  m_srv.logPeerlist();
   return true;
 }
 
@@ -194,7 +194,7 @@ bool DaemonCommandsHandler::print_cn(const std::vector<std::string> &args)
     logger(logging::ERROR) << "Usage: \"print_cn\"";
     return true;
   }
-  m_srv.get_payload_object().log_connections();
+  m_srv.getPayloadObject().log_connections();
   return true;
 }
 
@@ -448,7 +448,7 @@ bool DaemonCommandsHandler::start_mining(const std::vector<std::string> &args)
     return true;
   }
 
-  if (!m_core.currency().isTestnet() && !m_srv.get_payload_object().isSynchronized())
+  if (!m_core.currency().isTestnet() && !m_srv.getPayloadObject().isSynchronized())
   {
     logger(logging::ERROR) << "Cannot mine while synchronizing; wait until the chain is caught up";
     return true;
@@ -498,7 +498,7 @@ bool DaemonCommandsHandler::start_gpu_mining(const std::vector<std::string> &arg
     return true;
   }
 
-  if (!m_core.currency().isTestnet() && !m_srv.get_payload_object().isSynchronized())
+  if (!m_core.currency().isTestnet() && !m_srv.getPayloadObject().isSynchronized())
   {
     logger(logging::ERROR) << "Cannot mine while synchronizing; wait until the chain is caught up";
     return true;

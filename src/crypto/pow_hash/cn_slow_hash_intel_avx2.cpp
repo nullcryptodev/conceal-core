@@ -33,6 +33,7 @@
 
 namespace
 {
+ATTRIBUTE
 void traceM256i(const char* label, __m256i v)
 {
   alignas(32) int32_t a[8];

@@ -3,6 +3,7 @@
 // Distributed under the MIT/X11 software license
 
 #include "BoltHttpServer.h"
+#include "BoltSocket.hpp"
 #include "FiberExecutor.h"
 
 #include <sys/socket.h>
@@ -118,7 +119,7 @@ namespace BoltHttp
   // Start
   void Server::start(const std::string &bindIp, uint16_t port)
   {
-    m_serverSocket = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    m_serverSocket = socket(AF_INET, SOCK_STREAM | BOLT_SOCK_NONBLOCK, 0);
     if (m_serverSocket < 0)
     {
       std::cerr << "BoltHttp: Failed to create socket" << std::endl;
@@ -227,7 +228,7 @@ namespace BoltHttp
     {
       sockaddr_in clientAddr{};
       socklen_t clientLen = sizeof(clientAddr);
-      int clientFd = accept4(m_serverSocket, (sockaddr *)&clientAddr, &clientLen, SOCK_NONBLOCK);
+      int clientFd = accept4(m_serverSocket, (sockaddr *)&clientAddr, &clientLen, BOLT_SOCK_NONBLOCK);
       if (clientFd < 0)
         continue;
 

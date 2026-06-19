@@ -16,9 +16,9 @@ class ContextGroupTimeout {
 public: 
   ContextGroupTimeout(Dispatcher&, ContextGroup&, std::chrono::nanoseconds);
 
-private: 
-  Timer timeoutTimer;
-  ContextGroup workingContextGroup;
+private:
+  Timer m_timeoutTimer;
+  ContextGroup m_workingContextGroup;
 };
 
 }

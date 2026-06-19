@@ -10,6 +10,124 @@
 #include <vector>
 #include <cstring>
 #include <ctime>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+namespace
+{
+struct WinsockInit
+{
+  WinsockInit()
+  {
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+  }
+  ~WinsockInit() { WSACleanup(); }
+};
+} // namespace
+
+std::string http_get(const std::string &host, int port, const std::string &path, int timeout_sec = 10)
+{
+  WinsockInit winsockInit;
+
+  SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (sock == INVALID_SOCKET)
+    return "";
+
+  u_long nonBlocking = 1;
+  if (ioctlsocket(sock, FIONBIO, &nonBlocking) != 0)
+  {
+    closesocket(sock);
+    return "";
+  }
+
+  struct hostent *server = gethostbyname(host.c_str());
+  if (!server)
+  {
+    closesocket(sock);
+    return "";
+  }
+
+  sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  memcpy(&addr.sin_addr.s_addr, server->h_addr, server->h_length);
+  addr.sin_port = htons(static_cast<u_short>(port));
+
+  if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR)
+  {
+    const int err = WSAGetLastError();
+    if (err != WSAEWOULDBLOCK && err != WSAEINPROGRESS)
+    {
+      closesocket(sock);
+      return "";
+    }
+
+    fd_set fdset;
+    FD_ZERO(&fdset);
+    FD_SET(sock, &fdset);
+    timeval tv;
+    tv.tv_sec = timeout_sec;
+    tv.tv_usec = 0;
+
+    if (select(0, NULL, &fdset, NULL, &tv) <= 0)
+    {
+      closesocket(sock);
+      return "";
+    }
+
+    int so_error = 0;
+    int len = sizeof(so_error);
+    getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&so_error), &len);
+    if (so_error != 0)
+    {
+      closesocket(sock);
+      return "";
+    }
+  }
+
+  nonBlocking = 0;
+  ioctlsocket(sock, FIONBIO, &nonBlocking);
+
+  DWORD timeoutMs = static_cast<DWORD>(timeout_sec) * 1000;
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeoutMs), sizeof(timeoutMs));
+
+  const std::string request = "GET " + path + " HTTP/1.1\r\n" +
+                            "Host: " + host + "\r\n" +
+                            "Connection: close\r\n" +
+                            "\r\n";
+
+  if (send(sock, request.c_str(), static_cast<int>(request.size()), 0) <= 0)
+  {
+    closesocket(sock);
+    return "";
+  }
+
+  std::string response;
+  char buffer[4096];
+  while (true)
+  {
+    const int n = recv(sock, buffer, sizeof(buffer) - 1, 0);
+    if (n <= 0)
+      break;
+    buffer[n] = '\0';
+    response += buffer;
+  }
+
+  closesocket(sock);
+
+  const size_t headerEnd = response.find("\r\n\r\n");
+  if (headerEnd == std::string::npos)
+    return "";
+
+  return response.substr(headerEnd + 4);
+}
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -110,6 +228,7 @@ std::string http_get(const std::string &host, int port, const std::string &path,
 
   return response.substr(header_end + 4);
 }
+#endif
 
 void print_usage(const char *prog)
 {

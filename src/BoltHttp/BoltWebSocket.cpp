@@ -3,8 +3,7 @@
 // Distributed under the MIT/X11 software license
 
 #include "BoltWebSocket.h"
-#include <sys/socket.h>
-#include <unistd.h>
+#include "BoltSocket.hpp"
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -185,9 +184,9 @@ namespace BoltHttp
     {
       // Send close frame
       uint8_t closeFrame[] = {0x88, 0x00}; // FIN + close opcode, no payload
-      send(m_fd, closeFrame, sizeof(closeFrame), MSG_NOSIGNAL);
-      shutdown(m_fd, SHUT_RDWR);
-      ::close(m_fd);
+      boltSend(m_fd, reinterpret_cast<const char *>(closeFrame), sizeof(closeFrame), BOLT_MSG_NOSIGNAL);
+      boltShutdown(m_fd, BOLT_SHUT_RDWR);
+      boltClose(m_fd);
       m_fd = -1;
     }
   }
@@ -221,8 +220,8 @@ namespace BoltHttp
 
     frame.insert(frame.end(), message.begin(), message.end());
 
-    ssize_t sent = send(m_fd, frame.data(), frame.size(), MSG_NOSIGNAL);
-    return sent == static_cast<ssize_t>(frame.size());
+    const int sent = boltSend(m_fd, reinterpret_cast<const char *>(frame.data()), frame.size(), BOLT_MSG_NOSIGNAL);
+    return sent == static_cast<int>(frame.size());
   }
 
   bool WebSocket::sendBinary(const std::vector<uint8_t> &data)
@@ -253,8 +252,8 @@ namespace BoltHttp
 
     frame.insert(frame.end(), data.begin(), data.end());
 
-    ssize_t sent = send(m_fd, frame.data(), frame.size(), MSG_NOSIGNAL);
-    return sent == static_cast<ssize_t>(frame.size());
+    const int sent = boltSend(m_fd, reinterpret_cast<const char *>(frame.data()), frame.size(), BOLT_MSG_NOSIGNAL);
+    return sent == static_cast<int>(frame.size());
   }
 
   void WebSocket::processIncoming()
@@ -263,7 +262,7 @@ namespace BoltHttp
     {
       // Read HTTP headers for handshake
       char buf[4096];
-      ssize_t n = recv(m_fd, buf, sizeof(buf) - 1, 0);
+      const int n = boltRecv(m_fd, buf, sizeof(buf) - 1, 0);
       if (n <= 0)
       {
         if (m_onClose)
@@ -293,14 +292,14 @@ namespace BoltHttp
 
       // Send handshake response
       std::string response = buildWebSocketHandshakeResponse(key);
-      send(m_fd, response.c_str(), response.size(), MSG_NOSIGNAL);
+      boltSend(m_fd, response.c_str(), response.size(), BOLT_MSG_NOSIGNAL);
       m_handshakeDone = true;
       return;
     }
 
     // Read frame data
     char buf[65536];
-    ssize_t n = recv(m_fd, buf, sizeof(buf), 0);
+    const int n = boltRecv(m_fd, buf, sizeof(buf), 0);
     if (n <= 0)
     {
       if (m_onClose)
@@ -383,7 +382,7 @@ namespace BoltHttp
       std::vector<uint8_t> pong = {0x8A};
       pong.push_back(static_cast<uint8_t>(payloadLen));
       pong.insert(pong.end(), payload.begin(), payload.end());
-      send(m_fd, pong.data(), pong.size(), MSG_NOSIGNAL);
+      boltSend(m_fd, reinterpret_cast<const char *>(pong.data()), pong.size(), BOLT_MSG_NOSIGNAL);
       break;
     }
     case 0xA: // Pong — ignore

@@ -13,7 +13,7 @@
 #include "System/Event.h"
 
 #include "CryptoNoteCore/MessageQueue.h"
-#include "CryptoNoteCore/BlockchainMessages.h"
+#include "Blockchain/BlockchainMessages.h"
 #include "CryptoNoteCore/IntrusiveLinkedList.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
 

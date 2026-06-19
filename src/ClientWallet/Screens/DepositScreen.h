@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Screen.h"
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@ namespace ClientWallet
     enum class State
     {
       Idle,
+      EnterAmount,
       ConfirmCreate,
       Creating,
       ConfirmWithdraw,
@@ -75,6 +77,7 @@ namespace ClientWallet
     // Result
     std::string m_error;
     std::string m_txHash;
+    std::chrono::steady_clock::time_point m_taskStarted{};
 
     static constexpr int VISIBLE_ROWS = 8;
   };

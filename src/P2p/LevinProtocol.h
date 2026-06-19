@@ -7,7 +7,11 @@
 
 #pragma once
 
-#include "CryptoNote.h"
+#if __has_include(<CryptoNote.h>)
+#include <CryptoNote.h>
+#else
+#include "../../include/CryptoNote.h"
+#endif
 #include <Common/MemoryInputStream.h>
 #include <Common/VectorOutputStream.h>
 #include "Serialization/KVBinaryInputStreamSerializer.h"

@@ -69,8 +69,10 @@ namespace cn
     std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
 
     std::stringstream ss;
-    for (const auto &[amount, outputs] : m_outputs)
+    for (const auto &entry : m_outputs)
     {
+      const uint64_t amount = entry.first;
+      const auto &outputs = entry.second;
       if (outputs.empty())
         continue;
 

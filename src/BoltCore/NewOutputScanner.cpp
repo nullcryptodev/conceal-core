@@ -51,19 +51,20 @@ namespace BoltCore
     {
       const cn::TransactionOutput &output = tx.outputs[outIdx];
       uint32_t globalIndex = (outIdx < globalIndexes.size()) ? globalIndexes[outIdx] : 0;
+      const bool hasGlobalIndex = outIdx < globalIndexes.size();
 
       if (output.target.type() == typeid(cn::StandardPaymentOutput))
       {
         const cn::StandardPaymentOutput &stdOut = boost::get<cn::StandardPaymentOutput>(output.target);
         tryScanStandardOutput(stdOut, output.amount, static_cast<uint32_t>(outIdx),
-                              globalIndex, blockHeight, txPubKey, viewSecretKey,
+                              globalIndex, hasGlobalIndex, blockHeight, txHash, txPubKey, viewSecretKey,
                               spendPublicKey, spendSecretKey, results);
       }
       else if (output.target.type() == typeid(cn::MultisigPaymentOutput))
       {
         const cn::MultisigPaymentOutput &msigOut = boost::get<cn::MultisigPaymentOutput>(output.target);
         tryScanMultisigOutput(msigOut, output.amount, static_cast<uint32_t>(outIdx),
-                              globalIndex, blockHeight, txPubKey, viewSecretKey,
+                              globalIndex, hasGlobalIndex, blockHeight, txHash, txPubKey, viewSecretKey,
                               spendPublicKey, results);
       }
       // DomainRegistrationOutput (0x06) and DomainDeletionOutput (0x07)
@@ -76,7 +77,9 @@ namespace BoltCore
       uint64_t amount,
       uint32_t outputIndex,
       uint32_t globalIndex,
+      bool hasGlobalOutputIndex,
       uint32_t blockHeight,
+      const crypto::Hash &txHash,
       const crypto::PublicKey &txPubKey,
       const crypto::SecretKey &viewSecretKey,
       const crypto::PublicKey &spendPublicKey,
@@ -107,6 +110,7 @@ namespace BoltCore
     // Step 3: Output is confirmed ours — build result
     BoltSync::FoundOutput fo;
     fo.blockHeight = blockHeight;
+    fo.txHash = txHash;
     fo.outputIndex = outputIndex;
     fo.amount = amount;
     fo.outputKey = out.key;
@@ -114,6 +118,13 @@ namespace BoltCore
     fo.txExtra = std::vector<uint8_t>(); // Can be populated from tx.extra if needed
     fo.isDeposit = false;
     fo.term = 0;
+    fo.keyDerivationIndex = out.key_index;
+    fo.hasKeyDerivationIndex = true;
+    if (hasGlobalOutputIndex)
+    {
+      fo.globalOutputIndex = globalIndex;
+      fo.hasGlobalOutputIndex = true;
+    }
 
     // Generate key image if spend key is available
     if (spendSecretKey)
@@ -145,7 +156,9 @@ namespace BoltCore
       uint64_t amount,
       uint32_t outputIndex,
       uint32_t globalIndex,
+      bool hasGlobalOutputIndex,
       uint32_t blockHeight,
+      const crypto::Hash &txHash,
       const crypto::PublicKey &txPubKey,
       const crypto::SecretKey &viewSecretKey,
       const crypto::PublicKey &spendPublicKey,
@@ -172,15 +185,23 @@ namespace BoltCore
       {
         BoltSync::FoundOutput fo;
         fo.blockHeight = blockHeight;
+        fo.txHash = txHash;
         fo.outputIndex = outputIndex;
         fo.amount = amount;
         fo.outputKey = out.keys[ki];
         fo.txPublicKey = txPubKey;
         fo.txExtra = std::vector<uint8_t>();
         fo.term = out.term;
+        fo.keyDerivationIndex = static_cast<uint32_t>(out.key_index + ki);
+        fo.hasKeyDerivationIndex = true;
 
         // Set deposit status based on flags
         fo.isDeposit = out.isTimeLocked();
+        if (hasGlobalOutputIndex)
+        {
+          fo.globalOutputIndex = globalIndex;
+          fo.hasGlobalOutputIndex = true;
+        }
 
         // Note: out.isAuthorized() indicates a flexible bridge/HTLC deposit.
         // The wallet can check this flag via the MultisigPaymentOutput when

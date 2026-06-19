@@ -5,7 +5,7 @@
 
 #include "gtest/gtest.h"
 
-#include <CryptoNoteCore/DepositIndex.h>
+#include <Blockchain/DepositIndex.h>
 
 using namespace cn;
 

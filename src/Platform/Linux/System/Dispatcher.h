@@ -100,20 +100,20 @@ public:
 
 private:
   void spawn(std::function<void()>&& procedure);
-  int epoll;
-  alignas(void*) uint8_t mutex[SIZEOF_PTHREAD_MUTEX_T];
-  int remoteSpawnEvent;
-  ContextPair remoteSpawnEventContext;
-  std::queue<std::function<void()>> remoteSpawningProcedures;
-  std::stack<int> timers;
+  int m_epoll;
+  alignas(void*) uint8_t m_mutex[SIZEOF_PTHREAD_MUTEX_T];
+  int m_remoteSpawnEvent;
+  ContextPair m_remoteSpawnEventContext;
+  std::queue<std::function<void()>> m_remoteSpawningProcedures;
+  std::stack<int> m_timers;
 
-  NativeContext mainContext;
-  NativeContextGroup contextGroup;
-  NativeContext* currentContext;
-  NativeContext* firstResumingContext;
-  NativeContext* lastResumingContext;
-  NativeContext* firstReusableContext;
-  size_t runningContextCount;
+  NativeContext m_mainContext;
+  NativeContextGroup m_contextGroup;
+  NativeContext* m_currentContext;
+  NativeContext* m_firstResumingContext;
+  NativeContext* m_lastResumingContext;
+  NativeContext* m_firstReusableContext;
+  size_t m_runningContextCount;
 
   void contextProcedure(void* ucontext);
   static void contextProcedureStatic(void* context);

@@ -1406,6 +1406,10 @@ namespace cn
     fusionTxMaxSize(parameters::FUSION_TX_MAX_SIZE);
     fusionTxMinInputCount(parameters::FUSION_TX_MIN_INPUT_COUNT);
     fusionTxMinInOutCountRatio(parameters::FUSION_TX_MIN_IN_OUT_COUNT_RATIO);
+    fusionTxMaxOutputCount(parameters::FUSION_TX_MAX_OUTPUT_COUNT);
+    fusionBucketCount(parameters::FUSION_BUCKET_COUNT);
+    fusionStartingThreshold(parameters::FUSION_STARTING_THRESHOLD);
+    fusionOptimizationMinUnspentCount(parameters::FUSION_OPTIMIZATION_MIN_UNSPENT_COUNT);
 
     blocksFileName(parameters::CRYPTONOTE_BLOCKS_FILENAME);
     blocksCacheFileName(parameters::CRYPTONOTE_BLOCKSCACHE_FILENAME);

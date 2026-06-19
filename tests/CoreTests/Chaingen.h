@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/serialization/variant.hpp>
 #include "CryptoNoteCore/CoreConfig.h"
@@ -399,9 +400,21 @@ inline bool do_replay_events(std::vector<test_event_entry>& events, t_test_class
   if (!r)
     return false;
 
+  boost::filesystem::path testDataDir =
+      boost::filesystem::temp_directory_path() /
+      boost::filesystem::unique_path("conceal-core-test-%%%%%%%%");
+  boost::system::error_code ec;
+  boost::filesystem::create_directories(testDataDir, ec);
+  if (ec)
+  {
+    std::cout << concolor::magenta << "Failed to create test data directory: " << testDataDir << concolor::normal << std::endl;
+    return false;
+  }
+
   logging::ConsoleLogger logger;
   cn::CoreConfig coreConfig;
   coreConfig.init(vm);
+  coreConfig.configFolder = testDataDir.string();
   cn::MinerConfig emptyMinerConfig;
   cn::GpuMinerConfig emptyGpuMinerConfig;
   cn::cryptonote_protocol_stub pr; //TODO: stub only for this kind of test, make real validation of relayed objects
@@ -409,10 +422,13 @@ inline bool do_replay_events(std::vector<test_event_entry>& events, t_test_class
   if (!c.init(coreConfig, emptyMinerConfig, emptyGpuMinerConfig, -1, false))
   {
     std::cout << concolor::magenta << "Failed to init core" << concolor::normal << std::endl;
+    boost::filesystem::remove_all(testDataDir, ec);
     return false;
   }
 
-  return replay_events_through_core<t_test_class>(c, events, validator);
+  bool replayResult = replay_events_through_core<t_test_class>(c, events, validator);
+  boost::filesystem::remove_all(testDataDir, ec);
+  return replayResult;
 }
 //--------------------------------------------------------------------------
 template<class t_test_class>

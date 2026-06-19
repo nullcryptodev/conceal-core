@@ -25,6 +25,8 @@ std::string toLower(std::string s)
   return s;
 }
 
+#ifdef CONCEAL_WITH_OPENCL
+
 uint32_t rawModeIntensity(GpuIntensityMode mode, cl_uint computeUnits)
 {
   const uint32_t cu = static_cast<uint32_t>(computeUnits);
@@ -56,6 +58,8 @@ uint32_t capByMaxAlloc(uint32_t totalIntensity, cl_ulong maxAllocBytes)
 
   return jobsPerPipelineMax * GpuMinerConfig::kThreadsPerGpu;
 }
+
+#endif // CONCEAL_WITH_OPENCL
 
 std::string intensitySummary(const GpuDeviceSpec& spec)
 {

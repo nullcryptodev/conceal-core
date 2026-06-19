@@ -14,34 +14,27 @@ namespace cn
 
 namespace BoltCore
 {
-  class OutputSelector;
   class TransactionBuilder;
-  class SignatureBuilder;
-  class RelayHandler;
 
   class FusionManager
   {
   public:
-    FusionManager(const cn::Currency &currency,
-                  OutputSelector &outputSelector,
-                  TransactionBuilder &txBuilder,
-                  SignatureBuilder &sigBuilder,
-                  RelayHandler &relay);
+    FusionManager(const cn::Currency &currency, TransactionBuilder &txBuilder);
 
-    // Estimate how many outputs are ready for fusion
-    FusionEstimate estimate(uint64_t threshold,
-                            const std::vector<OutputInfo> &availableOutputs) const;
+    // Estimate how many outputs are ready for fusion.
+    // When mixin == 0 (anonymity 1), dust outputs are included as candidates.
+    FusionEstimate estimate(uint64_t threshold, uint64_t mixin,
+                            const std::vector<OutputInfo> &availableOutputs,
+                            uint32_t height) const;
 
     // Create a fusion transaction to consolidate outputs
     TransferResult createFusion(uint64_t threshold, uint64_t mixin,
                                 const std::vector<OutputInfo> &availableOutputs,
-                                const cn::AccountPublicAddress &destination);
+                                const cn::AccountPublicAddress &destination,
+                                uint32_t height);
 
   private:
     const cn::Currency &m_currency;
-    OutputSelector &m_outputSelector;
     TransactionBuilder &m_txBuilder;
-    SignatureBuilder &m_sigBuilder;
-    RelayHandler &m_relay;
   };
 }

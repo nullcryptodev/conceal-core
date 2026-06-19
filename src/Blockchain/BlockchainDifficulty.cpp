@@ -23,7 +23,7 @@ namespace cn
     size_t sz = blocksSize();
     uint8_t blockMajorVersion = get_block_major_version_for_height(static_cast<uint32_t>(sz));
     size_t window = m_currency.difficultyBlocksCountByBlockVersion(blockMajorVersion);
-    size_t offset = sz - std::min(sz, static_cast<uint64_t>(window));
+    size_t offset = sz - std::min(sz, window);
     if (offset == 0)
       ++offset;
 

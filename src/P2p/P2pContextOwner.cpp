@@ -11,23 +11,23 @@
 
 namespace cn {
 
-P2pContextOwner::P2pContextOwner(P2pContext* ctx, ContextList& contextList) : contextList(contextList) {
-  contextIterator = contextList.insert(contextList.end(), ContextList::value_type(ctx));
+P2pContextOwner::P2pContextOwner(P2pContext* ctx, ContextList& contextList) : m_contextList(contextList) {
+  m_contextIterator = m_contextList.insert(m_contextList.end(), ContextList::value_type(ctx));
 }
 
-P2pContextOwner::P2pContextOwner(P2pContextOwner&& other) : contextList(other.contextList), contextIterator(other.contextIterator) {
-  other.contextIterator = contextList.end();
+P2pContextOwner::P2pContextOwner(P2pContextOwner&& other) : m_contextList(other.m_contextList), m_contextIterator(other.m_contextIterator) {
+  other.m_contextIterator = m_contextList.end();
 }
 
 P2pContextOwner::~P2pContextOwner() {
-  if (contextIterator != contextList.end()) {
-    contextList.erase(contextIterator);
+  if (m_contextIterator != m_contextList.end()) {
+    m_contextList.erase(m_contextIterator);
   }
 }
 
 P2pContext& P2pContextOwner::get() {
-  assert(contextIterator != contextList.end());
-  return *contextIterator->get();
+  assert(m_contextIterator != m_contextList.end());
+  return *m_contextIterator->get();
 }
 
 P2pContext* P2pContextOwner::operator -> () {

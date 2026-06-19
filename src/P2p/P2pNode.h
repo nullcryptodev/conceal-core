@@ -62,7 +62,7 @@ private:
   typedef std::unique_ptr<P2pContext> ContextPtr;
   typedef std::list<ContextPtr> ContextList;
 
-  logging::LoggerRef logger;
+  logging::LoggerRef m_logger;
   bool m_stopRequested;
   const P2pNodeConfig m_cfg;
   const PeerIdType m_myPeerId;
@@ -70,7 +70,7 @@ private:
   const CORE_SYNC_DATA m_genesisPayload;
 
   platform_system::Dispatcher& m_dispatcher;
-  platform_system::ContextGroup workingContextGroup;
+  platform_system::ContextGroup m_workingContextGroup;
   platform_system::TcpListener m_listener;
   platform_system::Timer m_connectorTimer;
   PeerlistManager m_peerlist;

@@ -21,6 +21,10 @@ namespace BoltSync
     uint32_t blockHeight;
     crypto::Hash txHash;
     uint32_t outputIndex;
+    uint32_t globalOutputIndex;
+    bool hasGlobalOutputIndex = false;
+    uint32_t keyDerivationIndex = 0;
+    bool hasKeyDerivationIndex = false;
     uint64_t amount;
     crypto::PublicKey outputKey;
     crypto::PublicKey txPublicKey;

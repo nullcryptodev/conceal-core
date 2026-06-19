@@ -20,11 +20,11 @@ namespace cn
   struct IP2pEndpoint
   {
     virtual ~IP2pEndpoint() = default;
-    virtual void relay_notify_to_all(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) = 0;
-    virtual bool invoke_notify_to_peer(int command, const BinaryArray &req_buff, const cn::CryptoNoteConnectionContext &context) = 0;
-    virtual uint64_t get_connections_count() = 0;
-    virtual void for_each_connection(const std::function<void(cn::CryptoNoteConnectionContext &, PeerIdType)> &f) = 0;
-    virtual void drop_connection(CryptoNoteConnectionContext &context, bool add_fail) = 0;
+    virtual void relayNotifyToAll(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) = 0;
+    virtual bool invokeNotifyToPeer(int command, const BinaryArray &req_buff, const cn::CryptoNoteConnectionContext &context) = 0;
+    virtual uint64_t getConnectionsCount() = 0;
+    virtual void forEachConnection(const std::function<void(cn::CryptoNoteConnectionContext &, PeerIdType)> &f) = 0;
+    virtual void dropConnection(CryptoNoteConnectionContext &context, bool add_fail) = 0;
 
     // can be called from external threads
     virtual void externalRelayNotifyToAll(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) = 0;
@@ -33,11 +33,11 @@ namespace cn
 
   struct p2p_endpoint_stub : public IP2pEndpoint
   {
-    void relay_notify_to_all(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) override {}
-    bool invoke_notify_to_peer(int command, const BinaryArray &req_buff, const cn::CryptoNoteConnectionContext &context) override { return true; }
-    void drop_connection(CryptoNoteConnectionContext &context, bool add_fail) override {}
-    void for_each_connection(const std::function<void(cn::CryptoNoteConnectionContext &, PeerIdType)> &f) override {}
-    uint64_t get_connections_count() override { return 0; }
+    void relayNotifyToAll(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) override {}
+    bool invokeNotifyToPeer(int command, const BinaryArray &req_buff, const cn::CryptoNoteConnectionContext &context) override { return true; }
+    void dropConnection(CryptoNoteConnectionContext &context, bool add_fail) override {}
+    void forEachConnection(const std::function<void(cn::CryptoNoteConnectionContext &, PeerIdType)> &f) override {}
+    uint64_t getConnectionsCount() override { return 0; }
     void externalRelayNotifyToAll(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) override {}
     void externalRelayNotifyToList(int command, const BinaryArray &data_buff, const std::list<boost::uuids::uuid> &relayList) override {}
   };

@@ -4032,7 +4032,7 @@ namespace cn
         validateSourceAddresses(sourceAddresses);
         validateChangeDestination(sourceAddresses, destinationAddress, true);
 
-        const size_t MAX_FUSION_OUTPUT_COUNT = 8;
+        const size_t MAX_FUSION_OUTPUT_COUNT = m_currency.fusionTxMaxOutputCount();
         uint64_t fusionTreshold = m_currency.defaultDustThreshold();
         
         if (threshold <= fusionTreshold) {
@@ -4050,7 +4050,7 @@ namespace cn
       throw std::system_error(make_error_code(error::MIXIN_COUNT_TOO_BIG));
     }
 
-    auto fusionInputs = pickRandomFusionInputs(sourceAddresses, threshold, m_currency.fusionTxMinInputCount(), estimatedFusionInputsCount);
+    auto fusionInputs = pickRandomFusionInputs(sourceAddresses, threshold, mixin, m_currency.fusionTxMinInputCount(), estimatedFusionInputsCount);
     if (fusionInputs.size() < m_currency.fusionTxMinInputCount())
     {
       //nothing to optimize
@@ -4203,19 +4203,19 @@ namespace cn
 
   size_t WalletGreen::createOptimizationTransaction(const std::string &address)
   {
-    if (getUnspentOutputsCount() < 100)
+    if (getUnspentOutputsCount() < m_currency.fusionOptimizationMinUnspentCount())
     {
       throw std::system_error(make_error_code(error::NOTHING_TO_OPTIMIZE));
       return WALLET_INVALID_TRANSACTION_ID;
     }
 
     uint64_t balance = getActualBalance(address);
-    uint64_t threshold = 100;
+    uint64_t threshold = m_currency.fusionStartingThreshold();
     bool fusionReady = false;
     while (threshold <= balance && !fusionReady)
     {
       EstimateResult estimation = estimate(threshold, {address});
-      if (estimation.fusionReadyCount > 50)
+      if (estimation.fusionReadyCount > m_currency.fusionOptimizationReadyCount())
       {
         fusionReady = true;
         break;
@@ -4314,17 +4314,26 @@ namespace cn
   }
 
   std::vector<WalletGreen::OutputToTransfer> WalletGreen::pickRandomFusionInputs(const std::vector<std::string> &addresses,
-                                                                                 uint64_t threshold, size_t minInputCount, size_t maxInputCount) const
+                                                                                 uint64_t threshold, uint64_t mixin,
+                                                                                 size_t minInputCount, size_t maxInputCount) const
   {
 
     std::vector<WalletGreen::OutputToTransfer> allFusionReadyOuts;
+    std::vector<WalletGreen::OutputToTransfer> dustFusionOuts;
     auto walletOuts = addresses.empty() ? pickWalletsWithMoney() : pickWallets(addresses);
     std::array<size_t, std::numeric_limits<uint64_t>::digits10 + 1> bucketSizes;
     bucketSizes.fill(0);
+    const uint64_t dustThreshold = m_currency.defaultDustThreshold();
     for (auto &walletOut : walletOuts)
     {
       for (auto &out : walletOut.outs)
       {
+        if (mixin == 0 && out.amount > 0 && out.amount < dustThreshold)
+        {
+          dustFusionOuts.push_back({std::move(out), walletOut.wallet});
+          continue;
+        }
+
         uint8_t powerOfTen = 0;
         if (m_currency.isAmountApplicableInFusionTransactionInput(out.amount, threshold, powerOfTen, m_node.getLastKnownBlockHeight()))
         {
@@ -4334,6 +4343,9 @@ namespace cn
         }
       }
     }
+
+    const size_t dustReadyCount = dustFusionOuts.size();
+    const bool dustBucketEligible = mixin == 0 && dustReadyCount >= minInputCount;
 
     //now, pick the bucket
     std::vector<uint8_t> bucketNumbers(bucketSizes.size());
@@ -4348,9 +4360,37 @@ namespace cn
       }
     }
 
-    if (bucketNumberIndex == bucketNumbers.size())
+    const bool prettyBucketEligible = bucketNumberIndex != bucketNumbers.size();
+    if (!prettyBucketEligible && !dustBucketEligible)
     {
       return {};
+    }
+
+    const bool useDustBucket = dustBucketEligible &&
+                               (!prettyBucketEligible ||
+                                (crypto::rand<uint8_t>() & 1) == 0);
+
+    if (useDustBucket)
+    {
+      auto outputsSortingFunction = [](const OutputToTransfer &l, const OutputToTransfer &r)
+      { return l.out.amount < r.out.amount; };
+
+      if (dustFusionOuts.size() <= maxInputCount)
+      {
+        std::sort(dustFusionOuts.begin(), dustFusionOuts.end(), outputsSortingFunction);
+        return dustFusionOuts;
+      }
+
+      ShuffleGenerator<size_t, crypto::random_engine<size_t>> generator(dustFusionOuts.size());
+      std::vector<WalletGreen::OutputToTransfer> trimmedSelectedOuts;
+      trimmedSelectedOuts.reserve(maxInputCount);
+      for (size_t i = 0; i < maxInputCount; ++i)
+      {
+        trimmedSelectedOuts.push_back(std::move(dustFusionOuts[generator()]));
+      }
+
+      std::sort(trimmedSelectedOuts.begin(), trimmedSelectedOuts.end(), outputsSortingFunction);
+      return trimmedSelectedOuts;
     }
 
     size_t selectedBucket = bucketNumbers[bucketNumberIndex];

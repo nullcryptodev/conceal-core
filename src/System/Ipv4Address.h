@@ -24,7 +24,7 @@ public:
   std::string toDottedDecimal() const;
 
 private:
-  uint32_t value;
+  uint32_t m_value;
 };
 
 }

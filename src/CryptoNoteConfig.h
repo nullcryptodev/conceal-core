@@ -102,6 +102,16 @@ namespace cn
 		const size_t FUSION_TX_MAX_SIZE = CRYPTONOTE_BLOCK_GRANTED_FULL_REWARD_ZONE * 30 / 100;
 		const size_t FUSION_TX_MIN_INPUT_COUNT = 12;
 		const size_t FUSION_TX_MIN_IN_OUT_COUNT_RATIO = 4;
+		const size_t FUSION_TX_MAX_OUTPUT_COUNT = 8;
+		const size_t FUSION_BUCKET_COUNT = 20;
+		const uint64_t FUSION_STARTING_THRESHOLD = UINT64_C(100); /* 0.000100 CCX — fusion auto-optimize / UI default; NOT MINIMUM_FEE_V1 */
+		const uint64_t FUSION_THRESHOLD_LIST_MAX = UINT64_C(10000000000000000000);
+		const size_t FUSION_OPTIMIZATION_MIN_UNSPENT_COUNT = 100;
+
+		inline size_t fusionOptimizationReadyCount()
+		{
+			return FUSION_OPTIMIZATION_MIN_UNSPENT_COUNT / 2;
+		}
 
 		const uint64_t UPGRADE_HEIGHT = 1;
 		const uint64_t UPGRADE_HEIGHT_V2 = 1;

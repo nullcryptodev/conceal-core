@@ -5,23 +5,27 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "crypto/crypto.h"
+#include "BoltCore/BoltCoreTypes.h"
+#include "SyncEngine.h"
+
 namespace cn
 {
   class INode;
+  class Currency;
 }
 namespace BoltCore
 {
   class Wallet;
-}
-namespace cn
-{
-  class Currency;
 }
 
 namespace ClientWallet
@@ -29,6 +33,17 @@ namespace ClientWallet
 
   class SyncEngine;
   class Screen;
+
+  struct SyncWalletUpdate
+  {
+    std::vector<BoltCore::OutputInfo> outputs;
+    std::vector<BoltCore::OutputInfo> outputMetadata;
+    std::vector<crypto::KeyImage> spentKeyImages;
+    std::vector<std::pair<crypto::Hash, uint32_t>> depositSpends;
+    std::vector<std::pair<crypto::Hash, uint32_t>> outputSpends;
+    uint32_t scannedHeight = 0;
+    bool updateHeight = false;
+  };
 
   enum class EventType
   {
@@ -73,15 +88,23 @@ namespace ClientWallet
 
     void setCurrency(const cn::Currency &currency) { m_currency = &currency; }
 
-    void checkMempool();
+    // Called from a background thread after the UI is shown (daemon connect + mempool).
+    void setDeferredDaemonInit(std::function<bool()> initFn) { m_deferredDaemonInit = std::move(initFn); }
 
   private:
     void processEvent(const Event &event);
     void checkKeyboard();
-    void checkDaemonHeight();
+    void backgroundPollLoop();
     void renderCurrentScreen();
-    void updateStatusBar();
-    void timerTick();
+    void enqueueSyncUpdate(SyncWalletUpdate update);
+    void applyPendingSyncUpdates();
+    void applyPendingMempoolUpdates();
+    void submitWalletTask(std::function<BoltCore::TransferResult()> task,
+                          std::function<void(BoltCore::TransferResult)> done);
+    void walletTaskLoop();
+    void applyCompletedWalletTasks();
+    BoltCore::TransferResult runSpendPreflight(std::function<BoltCore::TransferResult()> task);
+    void mergeBackfilledGlobalIndices();
 
     std::string m_statePath;
 
@@ -90,20 +113,37 @@ namespace ClientWallet
 
     cn::INode *m_node = nullptr;
     const cn::Currency *m_currency = nullptr;
+    std::function<bool()> m_deferredDaemonInit;
+    bool m_deferredDaemonInitDone = false;
 
     std::vector<std::shared_ptr<Screen>> m_screens;
     std::atomic<bool> m_running{false};
 
+    std::mutex m_syncUpdateMutex;
+    std::deque<SyncWalletUpdate> m_pendingSyncUpdates;
+
+    std::mutex m_mempoolUpdateMutex;
+    std::deque<SyncEngine::MempoolUpdate> m_pendingMempoolUpdates;
+    std::thread m_pollThread;
+
+    std::mutex m_walletMutex;
+    std::atomic<bool> m_walletTaskRunning{false};
+    std::atomic<uint64_t> m_walletTaskEpoch{0};
+    std::mutex m_walletTaskMutex;
+    std::condition_variable m_walletTaskCv;
+    bool m_walletTaskPending = false;
+    std::function<BoltCore::TransferResult()> m_walletTask;
+    std::function<void(BoltCore::TransferResult)> m_walletTaskDone;
+    std::deque<std::pair<std::function<void(BoltCore::TransferResult)>, BoltCore::TransferResult>> m_walletTaskResults;
+    std::thread m_walletTaskThread;
+
     std::chrono::steady_clock::time_point m_lastRender;
-    std::chrono::steady_clock::time_point m_lastHeightCheck;
-    std::chrono::steady_clock::time_point m_lastMempoolCheck;
 
     uint32_t m_lastKnownHeight = 0;
     bool m_needsRedraw = true;
 
-    static constexpr int RENDER_INTERVAL_MS = 50;
-    static constexpr int HEIGHT_CHECK_INTERVAL_SEC = 5;
-    static constexpr int MEMPOOL_CHECK_INTERVAL_SEC = 10;
+    static constexpr int BACKGROUND_POLL_INTERVAL_SEC = 5;
+    static constexpr int RENDER_INTERVAL_MS = 200;
   };
 
 } // namespace ClientWallet

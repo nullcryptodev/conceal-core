@@ -18,15 +18,34 @@ set(MIGRATION_GUI_SOURCES
 )
 
 add_executable(MigrationToolGui ${MIGRATION_GUI_SOURCES})
-target_include_directories(MigrationToolGui PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${wxWidgets_INCLUDE_DIRS}
-)
-target_compile_definitions(MigrationToolGui PRIVATE ${wxWidgets_DEFINITIONS})
-if(wxWidgets_CXX_FLAGS)
-  target_compile_options(MigrationToolGui PRIVATE ${wxWidgets_CXX_FLAGS})
+target_include_directories(MigrationToolGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(_wxwidgetsUseCmakeTargets)
+  # MSYS2 ships wxWidgetsConfig.cmake with imported targets (wx::core, wx::base).
+  target_link_libraries(MigrationToolGui PRIVATE wx::core wx::base)
+else()
+  target_include_directories(MigrationToolGui PRIVATE ${wxWidgets_INCLUDE_DIRS})
+  target_compile_definitions(MigrationToolGui PRIVATE ${wxWidgets_DEFINITIONS})
+  if(wxWidgets_CXX_FLAGS)
+    target_compile_options(MigrationToolGui PRIVATE ${wxWidgets_CXX_FLAGS})
+  endif()
+
+  # wxMSW links version.lib; avoid CMake resolving "version" to our version UTILITY target.
+  set(_migrationGuiWxLibs)
+  foreach(_wxLib ${wxWidgets_LIBRARIES})
+    if(MSVC AND _wxLib STREQUAL "version")
+      list(APPEND _migrationGuiWxLibs "version.lib")
+    else()
+      list(APPEND _migrationGuiWxLibs ${_wxLib})
+    endif()
+  endforeach()
+  target_link_libraries(MigrationToolGui PRIVATE ${_migrationGuiWxLibs})
+
+  if(MSVC)
+    target_link_libraries(MigrationToolGui PRIVATE shlwapi.lib uxtheme.lib)
+  endif()
 endif()
-target_link_libraries(MigrationToolGui PRIVATE ${wxWidgets_LIBRARIES})
+
 add_dependencies(MigrationToolGui version)
 set_property(TARGET MigrationToolGui PROPERTY OUTPUT_NAME "conceald-migrate-gui")
 

@@ -351,7 +351,8 @@ protected:
   void subscribeWallets();
 
   std::vector<OutputToTransfer> pickRandomFusionInputs(const std::vector<std::string> &addresses,
-                                                       uint64_t threshold, size_t minInputCount, size_t maxInputCount) const;
+                                                       uint64_t threshold, uint64_t mixin,
+                                                       size_t minInputCount, size_t maxInputCount) const;
 
   ReceiverAmounts decomposeFusionOutputs(const AccountPublicAddress &address, uint64_t inputsAmount) const;
 

@@ -11,11 +11,11 @@
 using namespace platform_system;
 
 ContextGroupTimeout::ContextGroupTimeout(Dispatcher& dispatcher, ContextGroup& contextGroup, std::chrono::nanoseconds timeout) :
-  workingContextGroup(dispatcher),
-  timeoutTimer(dispatcher) {
-  workingContextGroup.spawn([&, timeout] {
+  m_workingContextGroup(dispatcher),
+  m_timeoutTimer(dispatcher) {
+  m_workingContextGroup.spawn([&, timeout] {
     try {
-      timeoutTimer.sleep(timeout);
+      m_timeoutTimer.sleep(timeout);
       contextGroup.interrupt();
     } catch (InterruptedException&) {
     }

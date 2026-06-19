@@ -5,6 +5,8 @@
 #pragma once
 
 #include "Common/Tui.h"
+#include "BoltCore/BoltCoreTypes.h"
+#include <functional>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -19,11 +21,15 @@ namespace ClientWallet
     GoToReceive,
     GoToHistory,
     GoToDeposit,
+    GoToFusion,
     Pop,
     Quit
   };
 
   using ActionCallback = std::function<void(ScreenAction)>;
+  using WalletTaskSubmitFn = std::function<void(
+      std::function<BoltCore::TransferResult()>,
+      std::function<void(BoltCore::TransferResult)>)>;
 
   class Screen
   {
@@ -38,6 +44,7 @@ namespace ClientWallet
     virtual std::string title() const = 0;
 
     void setActionCallback(ActionCallback cb) { m_onAction = std::move(cb); }
+    void setWalletTaskSubmit(WalletTaskSubmitFn fn) { m_submitWalletTask = std::move(fn); }
 
   protected:
     // Helper: draw header with title and status info
@@ -50,7 +57,11 @@ namespace ClientWallet
     // Helper: draw menu bar at bottom
     void drawMenuBar(Tui::ScreenBuffer &buf,
                      const std::vector<std::string> &items,
-                     const std::vector<std::string> &keys);
+                     const std::vector<std::string> &keys,
+                     int left = 0);
+
+    // Helper: tail of /tmp/conceal-wallet-sync.log
+    void drawLastSyncLog(Tui::ScreenBuffer &buf, int boxTop, size_t lineCount = 6);
 
     // Helper: show a centered message box
     void showMessage(Tui::ScreenBuffer &buf,
@@ -58,6 +69,7 @@ namespace ClientWallet
                      const std::string &message);
 
     ActionCallback m_onAction;
+    WalletTaskSubmitFn m_submitWalletTask;
 
   };
 

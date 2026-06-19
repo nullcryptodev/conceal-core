@@ -28,8 +28,8 @@ public:
   TcpConnection connect(const Ipv4Address& address, uint16_t port);
 
 private:
-  void* context;
-  Dispatcher* dispatcher;
+  void* m_context;
+  Dispatcher* m_dispatcher;
 };
 
 }

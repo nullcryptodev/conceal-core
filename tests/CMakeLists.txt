@@ -20,6 +20,9 @@ file(GLOB_RECURSE SystemTests System/*)
 file(GLOB_RECURSE TestGenerator TestGenerator/*)
 file(GLOB_RECURSE TransfersTests TransfersTests/*)
 file(GLOB_RECURSE UnitTests UnitTests/*)
+# PaymentGate/walletd removed in favor of conceal-rpc; these tests no longer compile.
+# TestUpgradeDetector targets the old BasicUpgradeDetector<BlockVector> API.
+list(FILTER UnitTests EXCLUDE REGEX ".*/(PaymentGateTests|TestWalletService|TestUpgradeDetector)\\.cpp$")
 
 file(GLOB_RECURSE CryptoNoteProtocol ../src/CryptoNoteProtocol/*)
 file(GLOB_RECURSE P2p ../src/P2p/*)
@@ -44,29 +47,35 @@ add_executable(HashTargetTests HashTarget.cpp)
 add_executable(HashTests Hash/main.cpp)
 add_executable(PowGpuEquivalenceTests pow_gpu_equivalence.cpp)
 add_executable(PowGpuMineEquivalenceTests pow_gpu_mine_equivalence.cpp)
+add_executable(BoltCoreBalanceTrackerTests BoltCoreBalanceTracker.cpp)
 
 if(WITH_OPENCL AND OpenCL_FOUND)
   add_executable(GpuVsCpuMiningHashTests gpu_vs_cpu_mining_hash.cpp)
 endif()
 
 target_link_libraries(CoreTests
-  -Wl,--start-group
+  ${CN_LINK_GROUP_START}
   TestGenerator CryptoNoteCore Blockchain Storage
-  -Wl,--end-group
+  ${CN_LINK_GROUP_END}
   Serialization System Logging Common crypto BlockchainExplorer ${Boost_LIBRARIES})
 target_link_libraries(IntegrationTests
-  -Wl,--start-group
+  ${CN_LINK_GROUP_START}
   IntegrationTestLibrary Wallet NodeRpcProxy InProcessNode P2P Rpc HTTP Transfers
   CryptoNoteCore Blockchain Storage
-  -Wl,--end-group
+  ${CN_LINK_GROUP_END}
   Serialization System Logging Common crypto BlockchainExplorer gtest libminiupnpc-static ${Boost_LIBRARIES})
 # pow/CryptoNoteCore are linked again via INTERFACE deps; Blockchain must follow.
 target_link_libraries(IntegrationTests Blockchain Storage)
-target_link_libraries(NodeRpcProxyTests NodeRpcProxy CryptoNoteCore Rpc HTTP Serialization System Logging Common crypto ${Boost_LIBRARIES})
+target_link_libraries(NodeRpcProxyTests
+  ${CN_LINK_GROUP_START}
+  NodeRpcProxy CryptoNoteCore pow Rpc HTTP
+  ${CN_LINK_GROUP_END}
+  Serialization System Logging Common crypto ${Boost_LIBRARIES})
+target_link_libraries(PowGpuEquivalenceTests crypto pow CryptoNoteCore ${Boost_LIBRARIES})
 target_link_libraries(PerformanceTests
-  -Wl,--start-group
+  ${CN_LINK_GROUP_START}
   CryptoNoteCore Blockchain Storage
-  -Wl,--end-group
+  ${CN_LINK_GROUP_END}
   Serialization Logging Common crypto ${Boost_LIBRARIES})
 target_link_libraries(SystemTests System gtest_main)
 if (MSVC)
@@ -74,28 +83,33 @@ if (MSVC)
   target_link_libraries(NodeRpcProxyTests ws2_32)
   target_link_libraries(CoreTests ws2_32)
 endif ()
-target_link_libraries(TransfersTests IntegrationTestLibrary Wallet gtest_main InProcessNode NodeRpcProxy P2P Rpc HTTP BlockchainExplorer CryptoNoteCore Serialization System Logging Transfers Common crypto libminiupnpc-static ${Boost_LIBRARIES})
+target_link_libraries(TransfersTests
+  ${CN_LINK_GROUP_START}
+  IntegrationTestLibrary Wallet gtest_main InProcessNode NodeRpcProxy P2P Rpc HTTP BlockchainExplorer
+  CryptoNoteCore Blockchain Storage Transfers
+  ${CN_LINK_GROUP_END}
+  Serialization System Logging Common crypto libminiupnpc-static ${Boost_LIBRARIES})
 target_link_libraries(UnitTests
-  -Wl,--start-group
-  TestGenerator PaymentGate Wallet NodeRpcProxy InProcessNode P2P Rpc HTTP Transfers
+  ${CN_LINK_GROUP_START}
+  TestGenerator Wallet NodeRpcProxy InProcessNode P2P Rpc HTTP Transfers
   CryptoNoteCore Blockchain Storage
-  -Wl,--end-group
+  ${CN_LINK_GROUP_END}
   Serialization System Logging Common crypto BlockchainExplorer gtest ${Boost_LIBRARIES})
 
 target_link_libraries(DifficultyTests CryptoNoteCore Serialization crypto Logging Common ${Boost_LIBRARIES})
 target_link_libraries(HashTargetTests CryptoNoteCore crypto)
 target_link_libraries(HashTests crypto)
-target_link_libraries(PowGpuEquivalenceTests crypto pow CryptoNoteCore)
 target_link_libraries(PowGpuMineEquivalenceTests pow CryptoNoteCore ${Boost_LIBRARIES})
+target_link_libraries(BoltCoreBalanceTrackerTests BoltCore CryptoNoteCore Logging Common crypto gtest ${Boost_LIBRARIES})
 
 if(WITH_OPENCL AND OpenCL_FOUND)
   target_link_libraries(GpuVsCpuMiningHashTests
-    -Wl,--start-group
+    ${CN_LINK_GROUP_START}
     pow CryptoNoteCore ${Boost_LIBRARIES}
-    -Wl,--end-group)
+    ${CN_LINK_GROUP_END})
 endif()
 
-add_custom_target(tests DEPENDS NodeRpcProxyTests PerformanceTests SystemTests UnitTests DifficultyTests HashTargetTests PowGpuEquivalenceTests PowGpuMineEquivalenceTests)
+add_custom_target(tests DEPENDS NodeRpcProxyTests PerformanceTests SystemTests UnitTests DifficultyTests HashTargetTests PowGpuEquivalenceTests PowGpuMineEquivalenceTests BoltCoreBalanceTrackerTests)
 
 if(WITH_OPENCL AND OpenCL_FOUND)
   add_dependencies(tests GpuVsCpuMiningHashTests)
@@ -117,6 +131,7 @@ set_property(TARGET
   DifficultyTests
   HashTargetTests
   HashTests
+  BoltCoreBalanceTrackerTests
 
 PROPERTY FOLDER "tests")
 
@@ -128,6 +143,8 @@ set_property(TARGET PerformanceTests PROPERTY OUTPUT_NAME "performance_tests")
 set_property(TARGET SystemTests PROPERTY OUTPUT_NAME "system_tests")
 set_property(TARGET TransfersTests PROPERTY OUTPUT_NAME "transfers_tests")
 set_property(TARGET UnitTests PROPERTY OUTPUT_NAME "unit_tests")
+
+set_property(TARGET BoltCoreBalanceTrackerTests PROPERTY OUTPUT_NAME "boltcore_balance_tracker_tests")
 
 set_property(TARGET DifficultyTests PROPERTY OUTPUT_NAME "difficulty_tests")
 set_property(TARGET HashTargetTests PROPERTY OUTPUT_NAME "hash_target_tests")
@@ -155,6 +172,7 @@ add_test(SystemTests system_tests)
 add_test(TransfersTests transfers_tests)
 add_test(UnitTests unit_tests --gtest_filter=-WalletApi.*:WalletApi_makeTransaction.*:WalletApi_commitTransaction.*:WalletApi_rollbackUncommitedTransaction.*:tx_pool.TxPoolDoesNotAcceptInvalidFusionTransaction:TxPool_FillBlockTemplate.TxPoolAddsFusionTransactionsToBlockTemplateNoMoreThanLimit:TxPool_FillBlockTemplate.TxPoolContinuesToAddOrdinaryTransactionsUpTo125PerCentOfMedianAfterAddingFusionTransactions:WalletLegacyApi.sendSeveralTransactions)
 
+add_test(BoltCoreBalanceTrackerTests boltcore_balance_tracker_tests)
 add_test(DifficultyTests difficulty_tests ${CMAKE_CURRENT_SOURCE_DIR}/Difficulty/data.txt)
 add_test(HashTargetTests hash_target_tests)
 foreach(hash IN ITEMS fast slow tree)

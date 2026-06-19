@@ -143,6 +143,11 @@ namespace cn
     size_t fusionTxMaxSize() const { return m_fusionTxMaxSize; }
     size_t fusionTxMinInputCount() const { return m_fusionTxMinInputCount; }
     size_t fusionTxMinInOutCountRatio() const { return m_fusionTxMinInOutCountRatio; }
+    size_t fusionTxMaxOutputCount() const { return m_fusionTxMaxOutputCount; }
+    size_t fusionBucketCount() const { return m_fusionBucketCount; }
+    uint64_t fusionStartingThreshold() const { return m_fusionStartingThreshold; }
+    size_t fusionOptimizationMinUnspentCount() const { return m_fusionOptimizationMinUnspentCount; }
+    size_t fusionOptimizationReadyCount() const { return m_fusionOptimizationMinUnspentCount / 2; }
 
     const std::string &blocksFileName() const { return m_blocksFileName; }
     const std::string &blocksCacheFileName() const { return m_blocksCacheFileName; }
@@ -286,6 +291,10 @@ namespace cn
     size_t m_fusionTxMaxSize;
     size_t m_fusionTxMinInputCount;
     size_t m_fusionTxMinInOutCountRatio;
+    size_t m_fusionTxMaxOutputCount;
+    size_t m_fusionBucketCount;
+    uint64_t m_fusionStartingThreshold;
+    size_t m_fusionOptimizationMinUnspentCount;
 
     std::string m_blocksFileName;
     std::string m_blocksCacheFileName;
@@ -608,6 +617,26 @@ namespace cn
     CurrencyBuilder &fusionTxMinInOutCountRatio(size_t val)
     {
       m_currency.m_fusionTxMinInOutCountRatio = val;
+      return *this;
+    }
+    CurrencyBuilder &fusionTxMaxOutputCount(size_t val)
+    {
+      m_currency.m_fusionTxMaxOutputCount = val;
+      return *this;
+    }
+    CurrencyBuilder &fusionBucketCount(size_t val)
+    {
+      m_currency.m_fusionBucketCount = val;
+      return *this;
+    }
+    CurrencyBuilder &fusionStartingThreshold(uint64_t val)
+    {
+      m_currency.m_fusionStartingThreshold = val;
+      return *this;
+    }
+    CurrencyBuilder &fusionOptimizationMinUnspentCount(size_t val)
+    {
+      m_currency.m_fusionOptimizationMinUnspentCount = val;
       return *this;
     }
 

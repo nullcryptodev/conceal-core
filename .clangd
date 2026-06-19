@@ -1,0 +1,7 @@
+CompileFlags:
+  Add:
+    - -Isrc
+    - -Iinclude
+    - -Isrc/Platform/Linux
+    - -Iexternal
+    - -Ibuild/version

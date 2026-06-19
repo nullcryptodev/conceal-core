@@ -52,7 +52,8 @@ namespace BoltSync
 
   bool deserializeBlockEntry(const cn::BinaryArray &rawEntry,
                              cn::Block &block,
-                             std::vector<cn::Transaction> &transactions)
+                             std::vector<cn::Transaction> &transactions,
+                             std::vector<std::vector<uint32_t>> *globalIndexesPerTx)
   {
     try
     {
@@ -65,8 +66,14 @@ namespace BoltSync
       block = entry.bl;
       transactions.clear();
       transactions.reserve(entry.transactions.size());
+      if (globalIndexesPerTx)
+        globalIndexesPerTx->clear();
       for (const auto &txe : entry.transactions)
+      {
         transactions.push_back(txe.tx);
+        if (globalIndexesPerTx)
+          globalIndexesPerTx->push_back(txe.m_global_output_indexes);
+      }
 
       return true;
     }
@@ -89,7 +96,8 @@ namespace BoltSync
 
       cn::Block block;
       std::vector<cn::Transaction> transactions;
-      if (!deserializeBlockEntry(serializedEntry, block, transactions))
+      std::vector<std::vector<uint32_t>> globalIndexesPerTx;
+      if (!deserializeBlockEntry(serializedEntry, block, transactions, &globalIndexesPerTx))
       {
         ctx.blocksProcessed.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -124,10 +132,10 @@ namespace BoltSync
           BoltCore::NewOutputScanner::scanTransaction(
               tx, txPubKey, indexes, blockHeight,
               ctx.viewKey, ctx.spendPublicKey, ctx.spendKey, ctx.results);
-          return; // Skip legacy scanning for this tx
+          // Fall through — legacy KeyOutput scanning still required for WalletGreen txs.
         }
 
-        // ── Legacy scanning below (pre-fork outputs) ──
+        // ── Legacy scanning below (KeyOutput / MultisignatureOutput) ──
 
         // Lazy-load filter record on first legacy transaction
         if (!haveFilter)
@@ -175,7 +183,7 @@ namespace BoltSync
             }
 
             crypto::PublicKey derivedKey;
-            if (crypto::derive_public_key(derivation, keyIndex, ctx.spendPublicKey, derivedKey) &&
+            if (crypto::derive_public_key(derivation, outIdx, ctx.spendPublicKey, derivedKey) &&
                 derivedKey == keyOut.key)
             {
               FoundOutput fo;
@@ -188,9 +196,14 @@ namespace BoltSync
               fo.txExtra = tx.extra;
               fo.isDeposit = false;
               fo.term = 0;
+              if (globalIndexes && outIdx < globalIndexes->size())
+              {
+                fo.globalOutputIndex = (*globalIndexes)[outIdx];
+                fo.hasGlobalOutputIndex = true;
+              }
               if (ctx.spendKey)
               {
-                crypto::SecretKey outSec = deriveOutputSecretKey(derivation, keyIndex, *ctx.spendKey);
+                crypto::SecretKey outSec = deriveOutputSecretKey(derivation, outIdx, *ctx.spendKey);
                 crypto::generate_key_image(keyOut.key, outSec, fo.keyImage);
               }
               std::lock_guard<std::mutex> lock(ctx.resultsMutex);
@@ -225,6 +238,11 @@ namespace BoltSync
                 fo.txExtra = tx.extra;
                 fo.isDeposit = (msigOut.term > 0);
                 fo.term = msigOut.term;
+                if (globalIndexes && outIdx < globalIndexes->size())
+                {
+                  fo.globalOutputIndex = (*globalIndexes)[outIdx];
+                  fo.hasGlobalOutputIndex = true;
+                }
                 std::lock_guard<std::mutex> lock(ctx.resultsMutex);
                 ctx.results.push_back(std::move(fo));
                 break;
@@ -235,15 +253,13 @@ namespace BoltSync
         }
       };
 
-      // Scan base transaction and all block transactions
-      // transactions[0] is the coinbase — process it too
-      scanTx(block.baseTransaction, h, NULL);
-
+      // transactions[0] is the coinbase (matches filter baseTransaction entry order).
       for (size_t txIdx = 0; txIdx < transactions.size(); ++txIdx)
       {
-        // We don't have global indexes in the current BlockEntry deserializer
-        // Pass NULL for now — global indexes are only needed for memo encryption
-        scanTx(transactions[txIdx], h, NULL);
+        const std::vector<uint32_t> *indexes = txIdx < globalIndexesPerTx.size()
+                                                   ? &globalIndexesPerTx[txIdx]
+                                                   : nullptr;
+        scanTx(transactions[txIdx], h, indexes);
       }
     }
     catch (const std::exception &)

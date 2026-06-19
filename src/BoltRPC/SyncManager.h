@@ -36,11 +36,16 @@ namespace BoltRPC
     crypto::Hash txHash;
     uint64_t amount;
     uint32_t outputIndex;
+    uint32_t globalOutputIndex = 0;
+    bool hasGlobalOutputIndex = false;
     crypto::PublicKey outputKey;
     crypto::PublicKey txPublicKey;
+    crypto::KeyImage keyImage;
     bool spent;
     bool isDeposit;
     uint32_t term;
+    uint32_t keyDerivationIndex = 0;
+    bool hasKeyDerivationIndex = false;
   };
 
   struct FilterCandidate
@@ -101,6 +106,9 @@ namespace BoltRPC
     uint32_t lastScannedHeight() const { return m_lastScannedHeight.load(); }
     bool isActive() const { return m_active.load(); }
 
+    // Raise persisted scan height (e.g. from wallet --state) without lowering it.
+    void seedScannedHeight(uint32_t height);
+
   private:
     // ── Internal sync methods ──────────────────────────────────────────────
     void runLoop();
@@ -115,7 +123,8 @@ namespace BoltRPC
     // ── Post-fork: direct block scanning with on-chain view tags ───────────
     void scanPostForkBlocks(uint32_t startHeight, uint32_t endHeight,
                             SyncProgress &progress,
-                            std::vector<OutputInfo> &owned);
+                            std::vector<OutputInfo> &owned,
+                            std::vector<crypto::KeyImage> &spentKeyImages);
 
     // ── Daemon communication ───────────────────────────────────────────────
     bool callGetFilterRecords(uint32_t startHeight, uint32_t endHeight,
@@ -159,6 +168,8 @@ namespace BoltRPC
     std::atomic<bool> m_active{false};
     std::atomic<bool> m_stop{false};
     std::atomic<bool> m_triggerSync{false};
+    // Logged once when get_filter_records is unavailable (old daemon).
+    bool m_loggedOldDaemon{false};
 
     ProgressCallback m_onProgress;
     OutputCallback m_onOutputs;

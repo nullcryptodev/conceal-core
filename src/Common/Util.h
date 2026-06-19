@@ -10,6 +10,8 @@
 #include <string>
 #include <system_error>
 
+#include "WindowsMacroUndef.h"
+
 namespace tools
 {
   std::string getDefaultDataDirectory(bool testnet = false);

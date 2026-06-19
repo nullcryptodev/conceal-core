@@ -26,10 +26,10 @@ public:
   void wait();
 
 private:
-  Dispatcher* dispatcher;
-  bool state;
-  void* first;
-  void* last;
+  Dispatcher* m_dispatcher;
+  bool m_state;
+  void* m_first;
+  void* m_last;
 };
 
 }

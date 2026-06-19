@@ -90,11 +90,12 @@ void InProcTestNode::workerThread(std::promise<std::string>& initPromise) {
     }
 
     cn::MinerConfig emptyMiner;
+    cn::GpuMinerConfig emptyGpuMiner;
     cn::CoreConfig coreConfig;
 
     coreConfig.configFolder = m_cfg.dataDir;
-    
-    if (!core->init(coreConfig, emptyMiner, true)) {
+
+    if (!core->init(coreConfig, emptyMiner, emptyGpuMiner, -1, true)) {
       throw std::runtime_error("Core failed to initialize");
     }
 

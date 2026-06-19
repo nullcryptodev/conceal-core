@@ -36,75 +36,75 @@ P2pContext::P2pContext(
   std::chrono::nanoseconds timedSyncInterval,
   const CORE_SYNC_DATA& timedSyncData)
   :
-  incoming(isIncoming),
-  remoteAddress(remoteAddress),
-  dispatcher(dispatcher),
-  contextGroup(dispatcher),
-  timeStarted(Clock::now()),
-  timedSyncInterval(timedSyncInterval),
-  timedSyncData(timedSyncData),
-  timedSyncTimer(dispatcher),
-  timedSyncFinished(dispatcher),
-  connection(std::move(conn)),
-  writeEvent(dispatcher),
-  readEvent(dispatcher) {
-  writeEvent.set();
-  readEvent.set();
-  lastReadTime = timeStarted; // use current time
-  contextGroup.spawn(std::bind(&P2pContext::timedSyncLoop, this));
+  m_incoming(isIncoming),
+  m_remoteAddress(remoteAddress),
+  m_dispatcher(dispatcher),
+  m_contextGroup(dispatcher),
+  m_timeStarted(Clock::now()),
+  m_timedSyncInterval(timedSyncInterval),
+  m_timedSyncData(timedSyncData),
+  m_timedSyncTimer(dispatcher),
+  m_timedSyncFinished(dispatcher),
+  m_connection(std::move(conn)),
+  m_writeEvent(dispatcher),
+  m_readEvent(dispatcher) {
+  m_writeEvent.set();
+  m_readEvent.set();
+  m_lastReadTime = m_timeStarted; // use current time
+  m_contextGroup.spawn(std::bind(&P2pContext::timedSyncLoop, this));
 }
 
 P2pContext::~P2pContext() {
   stop();
   // wait for timedSyncLoop finish
-  timedSyncFinished.wait();
+  m_timedSyncFinished.wait();
   // ensure that all read/write operations completed
-  readEvent.wait();
-  writeEvent.wait();
+  m_readEvent.wait();
+  m_writeEvent.wait();
 }
 
 PeerIdType P2pContext::getPeerId() const {
-  return peerId;
+  return m_peerId;
 }
 
 uint16_t P2pContext::getPeerPort() const {
-  return peerPort;
+  return m_peerPort;
 }
 
 const NetworkAddress& P2pContext::getRemoteAddress() const {
-  return remoteAddress;
+  return m_remoteAddress;
 }
 
 bool P2pContext::isIncoming() const {
-  return incoming;
+  return m_incoming;
 }
 
 void P2pContext::setPeerInfo(uint8_t protocolVersion, PeerIdType id, uint16_t port) {
-  version = protocolVersion;
-  peerId = id;
+  m_version = protocolVersion;
+  m_peerId = id;
   if (isIncoming()) {
-    peerPort = port;
+    m_peerPort = port;
   }
 }
 
 bool P2pContext::readCommand(LevinProtocol::Command& cmd) {
-  if (stopped) {
+  if (m_stopped) {
     throw InterruptedException();
   }
 
-  EventLock lk(readEvent);
-  bool result = LevinProtocol(connection).readCommand(cmd);
-  lastReadTime = Clock::now();
+  EventLock lk(m_readEvent);
+  bool result = LevinProtocol(m_connection).readCommand(cmd);
+  m_lastReadTime = Clock::now();
   return result;
 }
 
 void P2pContext::writeMessage(const Message& msg) {
-  if (stopped) {
+  if (m_stopped) {
     throw InterruptedException();
   }
 
-  EventLock lk(writeEvent);
-  LevinProtocol proto(connection);
+  EventLock lk(m_writeEvent);
+  LevinProtocol proto(m_connection);
 
   switch (msg.messageType) {
   case P2pContext::Message::NOTIFY:
@@ -124,9 +124,9 @@ void P2pContext::start() {
 } 
 
 void P2pContext::stop() {
-  if (!stopped) {
-    stopped = true;
-    contextGroup.interrupt();
+  if (!m_stopped) {
+    m_stopped = true;
+    m_contextGroup.interrupt();
   }
 }
 
@@ -135,20 +135,20 @@ void P2pContext::timedSyncLoop() {
   P2pContext::Message timedSyncMessage{ 
     P2pMessage{ 
       COMMAND_TIMED_SYNC::ID, 
-      LevinProtocol::encode(COMMAND_TIMED_SYNC::request{ timedSyncData })
+      LevinProtocol::encode(COMMAND_TIMED_SYNC::request{ m_timedSyncData })
     }, 
     P2pContext::Message::REQUEST 
   };
 
-  while (!stopped) {
+  while (!m_stopped) {
     try {
-      timedSyncTimer.sleep(timedSyncInterval);
+      m_timedSyncTimer.sleep(m_timedSyncInterval);
 
-      OperationTimeout<P2pContext> timeout(dispatcher, *this, timedSyncInterval);
+      OperationTimeout<P2pContext> timeout(m_dispatcher, *this, m_timedSyncInterval);
       writeMessage(timedSyncMessage);
 
       // check if we had read operation in given time interval
-      if ((lastReadTime + timedSyncInterval * 2) < Clock::now()) {
+      if ((m_lastReadTime + m_timedSyncInterval * 2) < Clock::now()) {
         stop();
         break;
       }
@@ -160,7 +160,7 @@ void P2pContext::timedSyncLoop() {
     }
   }
 
-  timedSyncFinished.set();
+  m_timedSyncFinished.set();
 }
 
 P2pContext::Message makeReply(uint32_t command, const BinaryArray& data, uint32_t returnCode) {

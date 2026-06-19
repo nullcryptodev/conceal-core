@@ -4,6 +4,7 @@
 
 #include "RelayHandler.h"
 
+#include <chrono>
 #include <future>
 
 #include "CryptoNoteCore/CryptoNoteBasic.h"
@@ -34,10 +35,21 @@ namespace BoltCore
     m_node.relayTransaction(tx, [&promise](std::error_code ec)
                             { promise.set_value(ec); });
 
+    if (future.wait_for(std::chrono::seconds(15)) != std::future_status::ready)
+    {
+      result.error = "Timed out relaying transaction to daemon (check conceald RPC on port 16000)";
+      return result;
+    }
+
     std::error_code ec = future.get();
     result.success = !ec;
     if (ec)
-      result.error = ec.message();
+    {
+      if (ec == std::errc::invalid_argument)
+        result.error = "Daemon rejected transaction (invalid inputs or ring signature — rescan wallet and retry)";
+      else
+        result.error = ec.message().empty() ? "Failed to relay transaction" : ec.message();
+    }
 
     return result;
   }

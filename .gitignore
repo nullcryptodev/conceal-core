@@ -28,4 +28,5 @@ cmake-build*
 
 external/FTXUI
 
+.cursor/*
 .cursorrules

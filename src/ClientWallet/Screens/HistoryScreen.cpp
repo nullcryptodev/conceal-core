@@ -16,10 +16,35 @@ namespace ClientWallet
   HistoryScreen::HistoryScreen(std::shared_ptr<BoltCore::Wallet> wallet)
       : m_wallet(std::move(wallet)) {}
 
+  bool HistoryScreen::matchesFilter(const BoltCore::OutputInfo &tx) const
+  {
+    if (tx.isDeposit)
+      return m_showDeposits;
+    if (tx.spent)
+      return m_showSpent;
+    return m_showReceived;
+  }
+
+  void HistoryScreen::applyFilters()
+  {
+    m_filtered.clear();
+    m_filtered.reserve(m_transactions.size());
+    for (const auto &tx : m_transactions)
+    {
+      if (matchesFilter(tx))
+        m_filtered.push_back(tx);
+    }
+
+    const int maxOffset = std::max(0, static_cast<int>(m_filtered.size()) - VISIBLE_ROWS);
+    if (m_scrollOffset > maxOffset)
+      m_scrollOffset = maxOffset;
+    if (m_selectedRow >= static_cast<int>(m_filtered.size()))
+      m_selectedRow = std::max(0, static_cast<int>(m_filtered.size()) - 1);
+  }
+
   void HistoryScreen::onEnter()
   {
     m_transactions = m_wallet->getOutputs();
-    // Sort by block height descending (newest first)
     std::sort(m_transactions.begin(), m_transactions.end(),
               [](const BoltCore::OutputInfo &a, const BoltCore::OutputInfo &b)
               {
@@ -27,49 +52,58 @@ namespace ClientWallet
               });
     m_scrollOffset = 0;
     m_selectedRow = 0;
+    applyFilters();
+  }
+
+  void HistoryScreen::toggleFilter(bool &flag)
+  {
+    flag = !flag;
+    m_scrollOffset = 0;
+    m_selectedRow = 0;
+    applyFilters();
   }
 
   void HistoryScreen::onKey(int key)
   {
-    int maxOffset = std::max(0, static_cast<int>(m_transactions.size()) - VISIBLE_ROWS);
+    const int maxOffset = std::max(0, static_cast<int>(m_filtered.size()) - VISIBLE_ROWS);
 
     switch (key)
     {
-    case 1000: // Up
+    case Tui::KEY_UP: // Up
       if (m_selectedRow > 0)
         m_selectedRow--;
       else if (m_scrollOffset > 0)
         m_scrollOffset--;
       break;
-    case 1001: // Down
+    case Tui::KEY_DOWN: // Down
       if (m_selectedRow < VISIBLE_ROWS - 1 &&
-          m_selectedRow + m_scrollOffset < static_cast<int>(m_transactions.size()) - 1)
+          m_selectedRow + m_scrollOffset < static_cast<int>(m_filtered.size()) - 1)
         m_selectedRow++;
       else if (m_scrollOffset < maxOffset)
         m_scrollOffset++;
       break;
-    case 1004: // Home
+    case Tui::KEY_HOME: // Home
       m_scrollOffset = 0;
       m_selectedRow = 0;
       break;
-    case 1005: // End
+    case Tui::KEY_END: // End
       m_scrollOffset = maxOffset;
       m_selectedRow = std::min(VISIBLE_ROWS - 1,
-                               static_cast<int>(m_transactions.size()) - m_scrollOffset - 1);
+                               static_cast<int>(m_filtered.size()) - m_scrollOffset - 1);
       break;
     case 'r':
-      m_showReceived = !m_showReceived;
-      onEnter();
+    case 'R':
+      toggleFilter(m_showReceived);
       break;
     case 's':
-      m_showSpent = !m_showSpent;
-      onEnter();
+    case 'S':
+      toggleFilter(m_showSpent);
       break;
     case 'd':
-      m_showDeposits = !m_showDeposits;
-      onEnter();
+    case 'D':
+      toggleFilter(m_showDeposits);
       break;
-    case 27: // Escape
+    case Tui::KEY_ESC: // Escape
       if (m_onAction)
         m_onAction(ScreenAction::Pop);
       break;
@@ -112,52 +146,38 @@ namespace ClientWallet
   void HistoryScreen::render(Tui::ScreenBuffer &buf)
   {
     auto balance = m_wallet->getBalance();
-    drawHeader(buf, title(), balance.currentHeight, balance.actual,
-               std::to_string(m_transactions.size()) + " total | " +
-                   "R:received S:sent D:deposits");
+    drawHeader(buf, title(), balance.currentHeight, BoltCore::spendableAmountBeforeFee(balance),
+               std::to_string(m_filtered.size()) + " shown / " +
+                   std::to_string(m_transactions.size()) + " total");
 
-    // Column headers
-    int top = 5;
+    const int top = 5;
+
+    std::string filters;
+    filters += Tui::dim() + " Filters:";
+    filters += (m_showReceived ? Tui::green() : Tui::dim()) + " [R]eceived" + Tui::reset();
+    filters += (m_showSpent ? Tui::red() : Tui::dim()) + " [S]ent" + Tui::reset();
+    filters += (m_showDeposits ? Tui::magenta() : Tui::dim()) + " [D]eposits" + Tui::reset();
+    buf.writeAt(top - 1, 2, filters);
+
     buf.writeAt(top, 2, Tui::bold() + Tui::underline() + " Dir Type      Amount (CCX)       Height    Status    TX Hash" + Tui::reset());
 
-    // Filter toggles
-    std::string filters;
-    filters += Tui::dim() + "Filters: ";
-    filters += (m_showReceived ? Tui::green() : Tui::dim()) + "[R]eceived " + Tui::reset();
-    filters += (m_showSpent ? Tui::red() + "[S]ent " : Tui::dim() + "[S]ent ") + Tui::reset();
-    filters += (m_showDeposits ? Tui::magenta() + "[D]eposits" : Tui::dim() + "[D]eposits") + Tui::reset();
-    buf.writeAt(top - 1, 50, filters);
-
-    // Transaction rows
     int visibleCount = 0;
     for (int i = 0; i < VISIBLE_ROWS; ++i)
     {
-      int idx = m_scrollOffset + i;
-      int row = top + 1 + i;
-
-      // Find next visible transaction
-      while (idx < static_cast<int>(m_transactions.size()))
-      {
-        const auto &tx = m_transactions[idx];
-        if ((tx.isDeposit && m_showDeposits) ||
-            (tx.spent && m_showSpent) ||
-            (!tx.isDeposit && !tx.spent && m_showReceived))
-          break;
-        idx++;
-      }
-
-      if (idx >= static_cast<int>(m_transactions.size()))
+      const int idx = m_scrollOffset + i;
+      const int row = top + 1 + i;
+      if (idx >= static_cast<int>(m_filtered.size()))
         break;
 
-      const auto &tx = m_transactions[idx];
-      bool isSelected = (visibleCount == m_selectedRow);
+      const auto &tx = m_filtered[idx];
+      const bool isSelected = (visibleCount == m_selectedRow);
 
-      std::string color = txColor(tx);
-      std::string dir = txDirection(tx);
-      std::string type = formatTxType(tx);
-      std::string amount = formatAmount(tx.amount);
-      std::string hashStr = common::podToHex(tx.txHash).substr(0, 12);
-      std::string status = tx.spent ? "spent" : (tx.isDeposit ? "locked" : "ok");
+      const std::string color = txColor(tx);
+      const std::string dir = txDirection(tx);
+      const std::string type = formatTxType(tx);
+      const std::string amount = formatAmount(tx.amount);
+      const std::string hashStr = common::podToHex(tx.txHash).substr(0, 12);
+      const std::string status = tx.spent ? "spent" : (tx.isDeposit ? "locked" : "ok");
 
       std::ostringstream line;
       line << (isSelected ? Tui::bold() + Tui::brightWhite() : "")
@@ -173,15 +193,13 @@ namespace ClientWallet
       visibleCount++;
     }
 
-    // Scroll indicators
     if (m_scrollOffset > 0)
       buf.writeAt(top + 1, 0, Tui::dim() + "▲" + Tui::reset());
-    if (m_scrollOffset + VISIBLE_ROWS < static_cast<int>(m_transactions.size()))
+    if (m_scrollOffset + VISIBLE_ROWS < static_cast<int>(m_filtered.size()))
       buf.writeAt(top + VISIBLE_ROWS, 0, Tui::dim() + "▼" + Tui::reset());
 
-    // Summary at bottom
     uint64_t totalRecv = 0, totalSent = 0, totalDep = 0;
-    for (const auto &tx : m_transactions)
+    for (const auto &tx : m_filtered)
     {
       if (tx.isDeposit)
         totalDep += tx.amount;
@@ -198,8 +216,9 @@ namespace ClientWallet
     buf.writeAt(top + VISIBLE_ROWS + 2, 2, summary.str());
 
     drawMenuBar(buf,
-                {"Overview", "Filters", "Quit"},
-                {"Esc", "R/S/D", "Q"});
+                {"Overview", "Quit"},
+                {"Esc", "Q"},
+                2);
   }
 
 } // namespace ClientWallet

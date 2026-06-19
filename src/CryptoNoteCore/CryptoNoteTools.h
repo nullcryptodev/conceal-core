@@ -14,6 +14,7 @@
 #include "Serialization/BinaryOutputStreamSerializer.h"
 #include "Serialization/BinaryInputStreamSerializer.h"
 #include "CryptoNoteSerialization.h"
+#include "../Common/WindowsMacroUndef.h"
 
 namespace cn {
 

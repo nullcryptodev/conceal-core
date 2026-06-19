@@ -3,8 +3,7 @@
 // Distributed under the MIT/X11 software license
 
 #include "BoltSse.h"
-#include <sys/socket.h>
-#include <unistd.h>
+#include "BoltSocket.hpp"
 #include <algorithm>
 
 namespace BoltHttp
@@ -34,8 +33,8 @@ namespace BoltHttp
   {
     if (m_fd >= 0)
     {
-      shutdown(m_fd, SHUT_RDWR);
-      ::close(m_fd);
+      boltShutdown(m_fd, BOLT_SHUT_RDWR);
+      boltClose(m_fd);
       m_fd = -1;
     }
   }
@@ -51,8 +50,8 @@ namespace BoltHttp
       frame += "event: " + type + "\n";
     frame += "data: " + data + "\n\n";
 
-    ssize_t sent = send(m_fd, frame.c_str(), frame.size(), MSG_NOSIGNAL);
-    return sent == static_cast<ssize_t>(frame.size());
+    const int sent = boltSend(m_fd, frame.c_str(), frame.size(), BOLT_MSG_NOSIGNAL);
+    return sent == static_cast<int>(frame.size());
   }
 
   bool SseConnection::sendComment(const std::string &comment)
@@ -61,8 +60,8 @@ namespace BoltHttp
       return false;
 
     std::string frame = ": " + comment + "\n\n";
-    ssize_t sent = send(m_fd, frame.c_str(), frame.size(), MSG_NOSIGNAL);
-    return sent == static_cast<ssize_t>(frame.size());
+    const int sent = boltSend(m_fd, frame.c_str(), frame.size(), BOLT_MSG_NOSIGNAL);
+    return sent == static_cast<int>(frame.size());
   }
 
   // SseBroadcaster

@@ -29,8 +29,8 @@ public:
 
 private:
 
-  ContextList& contextList;
-  ContextList::iterator contextIterator;
+  ContextList& m_contextList;
+  ContextList::iterator m_contextIterator;
 };
 
 }

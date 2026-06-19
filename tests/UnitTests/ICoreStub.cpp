@@ -5,6 +5,8 @@
 
 #include "ICoreStub.h"
 
+#include <functional>
+
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/IBlock.h"
@@ -377,4 +379,15 @@ bool ICoreStub::removeMessageQueue(cn::MessageQueue<cn::BlockchainMessage>& mess
 
 void ICoreStub::setPoolChangesResult(bool result) {
   poolChangesResult = result;
+}
+
+cn::CheckpointList ICoreStub::getCheckpointList(uint32_t /*startHeight*/, uint32_t /*endHeight*/) const {
+  return cn::CheckpointList();
+}
+
+bool ICoreStub::addCheckpoint(uint32_t /*height*/, const std::string& /*hash*/) {
+  return false;
+}
+
+void ICoreStub::setCheckpointGeneratedCallback(std::function<void(uint32_t, const crypto::Hash&)> /*callback*/) {
 }

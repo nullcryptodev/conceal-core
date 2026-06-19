@@ -16,6 +16,7 @@
 #include "DaemonCommandsHandler.h"
 #include "Blockchain/BlockchainFilter.h"
 #include "Blockchain/Checkpoints.h"
+#include "Common/CommandLine.h"
 #include "Common/PathTools.h"
 #include "Common/SignalHandler.h"
 #include "CryptoNoteCore/Core.h"

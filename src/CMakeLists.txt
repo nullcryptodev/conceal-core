@@ -32,6 +32,10 @@ file(GLOB_RECURSE CLIENT_WALLET_FILES ClientWallet/*)
 file(GLOB_RECURSE BOLTRPC_FILES BoltRPC/*)
 file(GLOB_RECURSE SIDECHAIN_FILES Sidechain/*)
 file(GLOB_RECURSE BOLTHTTP_FILES BoltHttp/*)
+if(WIN32 OR APPLE)
+  list(FILTER BOLTHTTP_FILES EXCLUDE REGEX ".*/BoltHttpServer\\.cpp$")
+  list(APPEND BOLTHTTP_FILES "${CMAKE_CURRENT_SOURCE_DIR}/BoltHttp/BoltHttpServer_win.cpp")
+endif()
 file(GLOB_RECURSE NODECLIENT_FILES NodeClient/*)
 
 if(MSVC OR MINGW)
@@ -76,6 +80,9 @@ add_library(JsonRpcServer STATIC ${JsonRpcServer})
 add_library(BoltSync STATIC ${BOLTSYNC_FILES})
 add_library(BoltCore STATIC ${BOLTCORE_FILES})
 add_library(BoltHttp STATIC ${BOLTHTTP_FILES})
+if(WIN32)
+  target_link_libraries(BoltHttp ws2_32)
+endif()
 
 # NodeClient — clean INode implementation using BoltHttp (no legacy coroutines)
 add_library(NodeClientLib STATIC ${NODECLIENT_FILES})
@@ -92,16 +99,22 @@ add_dependencies(NodeClientLib version)
 add_library(Storage STATIC ${MDBX_STORAGE_FILES})
 add_dependencies(Storage version)
 target_link_libraries(Storage PRIVATE ${MDBX_LIBRARY_TARGET} Blockchain Serialization Common crypto)
+if(WIN32)
+  target_link_libraries(Storage PUBLIC psapi)
+endif()
 
 # Sidechain static library
 add_library(SidechainLib STATIC ${SIDECHAIN_FILES})
 target_link_libraries(SidechainLib PUBLIC Blockchain NodeRpcProxy System Rpc HTTP BoltSync BoltCore BoltHttp CryptoNoteCore Serialization
-  -Wl,--start-group
+  ${CN_LINK_GROUP_START}
     Common
     Logging
     crypto
-  -Wl,--end-group
+  ${CN_LINK_GROUP_END}
   ${Boost_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+if(WIN32)
+  target_link_libraries(SidechainLib PUBLIC ws2_32)
+endif()
 add_dependencies(SidechainLib version)
 
 # BoltRPC static library — uses NodeClientLib instead of NodeRpcProxy
@@ -121,12 +134,15 @@ target_link_libraries(BoltRpcLib PUBLIC
     Serialization
     ${Boost_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
-    -Wl,--start-group
+    ${CN_LINK_GROUP_START}
     Common
     Logging
     crypto
-    -Wl,--end-group
+    ${CN_LINK_GROUP_END}
 )
+if(WIN32)
+  target_link_libraries(BoltRpcLib PUBLIC ws2_32)
+endif()
 add_dependencies(BoltRpcLib version)
 
 # ── Link dependencies ─────────────────────────────────────────────────────
@@ -150,6 +166,8 @@ add_executable(Sidechain ${SIDECHAIN_FILES})
 add_executable(ClientWallet ${CLIENT_WALLET_FILES})
 set_property(TARGET ClientWallet PROPERTY OUTPUT_NAME "conceal-wallet")
 add_dependencies(ClientWallet version)
+target_sources(ClientWallet PRIVATE ${CMAKE_SOURCE_DIR}/external/qrcodegen/qrcodegen.cpp)
+target_include_directories(ClientWallet PRIVATE ${CMAKE_SOURCE_DIR}/external/qrcodegen)
 
 if (MSVC)
   target_link_libraries(System ws2_32)
@@ -157,7 +175,7 @@ endif ()
 
 if (MINGW)
   target_link_libraries(Common dnsapi)
-  target_link_libraries(P2P bcrypt)
+  target_link_libraries(P2P PUBLIC bcrypt)
   target_link_libraries(System ws2_32)
 endif ()
 
@@ -190,12 +208,12 @@ target_link_libraries(ClientWallet
     System
     Serialization
     ${CMAKE_THREAD_LIBS_INIT}
-    -Wl,--start-group
+    ${CN_LINK_GROUP_START}
     Common
     Logging
     crypto
     ${Boost_LIBRARIES}
-    -Wl,--end-group
+    ${CN_LINK_GROUP_END}
 )
 
 # ── BoltRPC — uses NodeClientLib instead of NodeRpcProxy ──────────────────
@@ -214,21 +232,21 @@ target_link_libraries(BoltRPC
     CryptoNoteCore
     Serialization
     ${CMAKE_THREAD_LIBS_INIT}
-    -Wl,--start-group
+    ${CN_LINK_GROUP_START}
     Common
     Logging
     crypto
     ${Boost_LIBRARIES}
-    -Wl,--end-group
+    ${CN_LINK_GROUP_END}
 )
 
 # ── Sidechain ─────────────────────────────────────────────────────────────
 target_link_libraries(Sidechain BoltSync BoltCore BoltHttp NodeRpcProxy Rpc HTTP System Blockchain CryptoNoteCore Serialization
-  -Wl,--start-group
+  ${CN_LINK_GROUP_START}
       Common
       Logging
       crypto
-  -Wl,--end-group
+  ${CN_LINK_GROUP_END}
   ${Boost_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT}
 )

@@ -33,6 +33,7 @@
 #include "CryptoNoteCore/IBlock.h"
 
 #undef ERROR
+#include "Common/WindowsMacroUndef.h"
 
 using namespace logging;
 

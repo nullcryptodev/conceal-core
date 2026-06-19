@@ -23,7 +23,7 @@ set(POW_SOURCES
 
 add_library(pow STATIC ${POW_SOURCES})
 target_include_directories(pow PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(pow PUBLIC crypto CryptoNoteCore Common Logging)
+target_link_libraries(pow PUBLIC crypto CryptoNoteCore Common Logging ${Boost_LIBRARIES})
 
 if(WITH_OPENCL AND OpenCL_FOUND)
   target_compile_definitions(pow PUBLIC CONCEAL_WITH_OPENCL)

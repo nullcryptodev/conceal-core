@@ -24,24 +24,18 @@ namespace BoltCore
     if (available.empty())
       return result;
 
-    // Filter unspent only
-    std::vector<const OutputInfo *> unspent;
+    // Caller supplies pre-filtered funding outputs (Wallet::getFundingOutputs).
+    const uint64_t dustThreshold = m_currency.defaultDustThreshold();
+    std::unordered_map<int, std::vector<const OutputInfo *>> buckets;
     for (const auto &out : available)
     {
-      if (!out.spent)
-        unspent.push_back(&out);
-    }
+      if (out.spent || out.isDeposit)
+        continue;
+      if (out.amount <= dustThreshold)
+        continue;
 
-    // Group by digit count (same as WalletGreen)
-    std::unordered_map<int, std::vector<const OutputInfo *>> buckets;
-    for (const auto *out : unspent)
-    {
-      uint64_t dust = m_currency.defaultDustThreshold();
-      if (out->amount > dust)
-      {
-        int digits = static_cast<int>(floor(log10(out->amount)) + 1);
-        buckets[digits].push_back(out);
-      }
+      const int digits = static_cast<int>(floor(log10(out.amount)) + 1);
+      buckets[digits].push_back(&out);
     }
 
     // Pick one from each bucket, smallest first

@@ -32,6 +32,7 @@
 #include "version.h"
 
 #undef ERROR
+#include "Common/WindowsMacroUndef.h"
 
 using namespace logging;
 using namespace crypto;
@@ -342,7 +343,7 @@ bool RpcServer::processJsonRpcRequest(const HttpRequest& request, HttpResponse& 
 }
 
 bool RpcServer::isCoreReady() {
-  return m_core.currency().isTestnet() || m_p2p.get_payload_object().isSynchronized();
+  return m_core.currency().isTestnet() || m_p2p.getPayloadObject().isSynchronized();
 }
 
 bool RpcServer::enableCors(const std::string& domain) {
@@ -1116,8 +1117,8 @@ bool RpcServer::on_get_info(const COMMAND_RPC_GET_INFO::request&, COMMAND_RPC_GE
   res.tx_pool_size = m_core.get_pool_transactions_count();
   res.alt_blocks_count = m_core.get_alternative_blocks_count();
   res.fee_address = m_fee_address.empty() ? std::string() : m_fee_address;
-  uint64_t total_conn = m_p2p.get_connections_count();
-  res.outgoing_connections_count = m_p2p.get_outgoing_connections_count();
+  uint64_t total_conn = m_p2p.getConnectionsCount();
+  res.outgoing_connections_count = m_p2p.getOutgoingConnectionsCount();
   res.incoming_connections_count = total_conn - res.outgoing_connections_count;
   res.white_peerlist_size = m_p2p.getPeerlistManager().get_white_peers_count();
   res.grey_peerlist_size = m_p2p.getPeerlistManager().get_gray_peers_count();
@@ -1155,7 +1156,7 @@ bool RpcServer::on_get_info(const COMMAND_RPC_GET_INFO::request&, COMMAND_RPC_GE
   res.last_block_reward = block_header.reward;
   m_core.getBlockDifficulty(last_block_height, res.last_block_difficulty);
 
-  res.connections = m_p2p.get_payload_object().all_connections();
+  res.connections = m_p2p.getPayloadObject().all_connections();
   return true;
 }
 

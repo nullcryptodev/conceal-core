@@ -23,11 +23,14 @@ namespace BoltHttp
     HttpClient(const std::string &host, uint16_t port);
     ~HttpClient();
 
-    HttpClientResponse post(const std::string &path, const std::string &body);
-    HttpClientResponse get(const std::string &path);
+    HttpClientResponse post(const std::string &path, const std::string &body,
+                            const char *contentType = "application/json",
+                            int connectTimeoutMs = 5000, int recvTimeoutMs = 10000);
+    HttpClientResponse get(const std::string &path,
+                           int connectTimeoutMs = 5000, int recvTimeoutMs = 10000);
 
   private:
-    bool connect();
+    bool connect(int timeoutMs = 5000);
     std::string m_host;
     uint16_t m_port;
     int m_socket = -1;

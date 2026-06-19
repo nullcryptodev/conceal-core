@@ -11,7 +11,6 @@
 namespace cn
 {
   class Currency;
-  class ITransaction;
 }
 
 namespace BoltCore
@@ -19,7 +18,6 @@ namespace BoltCore
   class TransactionBuilder;
   class SignatureBuilder;
   class OutputSelector;
-  class RelayHandler;
 
   class DepositManager
   {
@@ -28,19 +26,14 @@ namespace BoltCore
                    TransactionBuilder &txBuilder,
                    SignatureBuilder &sigBuilder,
                    OutputSelector &outputSelector,
-                   RelayHandler &relay,
                    const cn::AccountPublicAddress &mainAddress);
 
-    // Create a time-locked deposit
     TransferResult createDeposit(uint64_t amount, uint32_t term,
-                                 const std::vector<OutputInfo> &availableOutputs);
+                                 const std::vector<OutputInfo> &fundingOutputs);
 
-    // Withdraw a matured deposit
-    TransferResult withdrawDeposit(uint64_t depositId,
-                                   const std::vector<OutputInfo> &availableOutputs,
-                                   const std::vector<DepositInfo> &deposits);
+    TransferResult withdrawDeposit(const OutputInfo &depositOutput,
+                                   const DepositInfo &deposit);
 
-    // Get interest earned on a deposit
     uint64_t calculateInterest(uint64_t amount, uint32_t term, uint32_t height) const;
 
   private:
@@ -48,7 +41,6 @@ namespace BoltCore
     TransactionBuilder &m_txBuilder;
     SignatureBuilder &m_sigBuilder;
     OutputSelector &m_outputSelector;
-    RelayHandler &m_relay;
     cn::AccountPublicAddress m_mainAddress;
   };
 }

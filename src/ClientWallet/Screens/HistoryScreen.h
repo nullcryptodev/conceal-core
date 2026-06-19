@@ -28,15 +28,20 @@ namespace ClientWallet
     std::string title() const override { return "Transaction History"; }
 
   private:
+    void applyFilters();
+    bool matchesFilter(const BoltCore::OutputInfo &tx) const;
+    void toggleFilter(bool &flag);
+
     std::shared_ptr<BoltCore::Wallet> m_wallet;
     std::vector<BoltCore::OutputInfo> m_transactions;
+    std::vector<BoltCore::OutputInfo> m_filtered;
     int m_scrollOffset = 0;
     int m_selectedRow = 0;
     static constexpr int VISIBLE_ROWS = 20;
-  
-    bool m_showDeposits;
-    bool m_showSpent;
-    bool m_showReceived;
+
+    bool m_showDeposits = true;
+    bool m_showSpent = true;
+    bool m_showReceived = true;
   };
 
 } // namespace ClientWallet

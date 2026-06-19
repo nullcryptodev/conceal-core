@@ -6,13 +6,16 @@
 #include "TransactionBuilder.h"
 #include "SignatureBuilder.h"
 #include "OutputSelector.h"
-#include "RelayHandler.h"
+#include "OutputUtils.h"
 #include "CryptoNoteCore/Currency.h"
 #include "CryptoNoteCore/TransactionApi.h"
-#include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
-#include <CryptoNoteCore/TransactionExtra.h>
+#include "CryptoNoteCore/CryptoNoteTools.h"
+#include "CryptoNoteConfig.h"
 #include "Common/StringTools.h"
+#include <algorithm>
+#include <random>
+#include <string>
 
 namespace BoltCore
 {
@@ -20,10 +23,9 @@ namespace BoltCore
                                  TransactionBuilder &txBuilder,
                                  SignatureBuilder &sigBuilder,
                                  OutputSelector &outputSelector,
-                                 RelayHandler &relay,
                                  const cn::AccountPublicAddress &mainAddress)
       : m_currency(currency), m_txBuilder(txBuilder), m_sigBuilder(sigBuilder),
-        m_outputSelector(outputSelector), m_relay(relay), m_mainAddress(mainAddress) {}
+        m_outputSelector(outputSelector), m_mainAddress(mainAddress) {}
 
   uint64_t DepositManager::calculateInterest(uint64_t amount, uint32_t term, uint32_t height) const
   {
@@ -31,91 +33,115 @@ namespace BoltCore
   }
 
   TransferResult DepositManager::createDeposit(uint64_t amount, uint32_t term,
-                                               const std::vector<OutputInfo> &availableOutputs)
+                                               const std::vector<OutputInfo> &fundingOutputs)
   {
     TransferResult result;
     result.success = false;
 
-    uint64_t fee = m_currency.minimumFee();
-    uint64_t neededMoney = amount + fee;
+    if (amount < m_currency.depositMinAmount())
+    {
+      result.error = "Deposit amount below minimum "
+                     + m_currency.formatAmount(m_currency.depositMinAmount());
+      return result;
+    }
 
-    auto selection = m_outputSelector.select(neededMoney, availableOutputs);
+    const uint32_t minTerm = m_currency.depositMinTermV3();
+    const uint32_t maxTerm = m_currency.depositMaxTermV3();
+    if (term < minTerm || term > maxTerm || term % minTerm != 0)
+    {
+      result.error = "Invalid deposit term (must be a multiple of "
+                     + std::to_string(minTerm) + " blocks / 1 month)";
+      return result;
+    }
+
+    // WalletGreen::createDeposit uses fee = 1000 (MINIMUM_FEE_V2), not minimumFee().
+    const uint64_t fee = m_currency.minimumFeeV2();
+    const uint64_t neededMoney = amount + fee;
+
+    const auto selection = m_outputSelector.select(neededMoney, fundingOutputs);
     if (!selection.enough)
     {
       result.error = "Insufficient funds for deposit";
       return result;
     }
 
-    uint64_t foundMoney = selection.totalFound;
-    uint64_t changeAmount = foundMoney - neededMoney;
+    const uint64_t changeAmount = selection.totalFound - neededMoney;
+    const uint64_t depositAmount = neededMoney - fee; // == amount; matches WalletGreen
 
-    // Build deposit transaction
     std::unique_ptr<cn::ITransaction> tx = cn::createTransaction();
     tx->setUnlockTime(0);
 
-    // Deterministic tx key
-    cn::AccountKeys dummyKeys;
-    dummyKeys.address = m_mainAddress;
-    tx->setDeterministicTransactionSecretKey(m_sigBuilder.deriveEphemeralSecretKey(
-        m_mainAddress.viewPublicKey, 0));
+    // Deposit multisig output first (WalletGreen order).
+    tx->addOutput(depositAmount, std::vector<cn::AccountPublicAddress>{m_mainAddress}, 1, term);
 
-    // Add deposit output (multisig with term)
-    std::vector<cn::AccountPublicAddress> depositTargets = {m_mainAddress};
-    tx->addOutput(amount, depositTargets, 1, term);
-
-    // Add change outputs
     if (changeAmount > 0)
     {
-      std::vector<uint64_t> changeAmounts;
+      using AmountToAddress = std::pair<const cn::AccountPublicAddress *, uint64_t>;
+      std::vector<AmountToAddress> changeOutputs;
+
       cn::decompose_amount_into_digits(
           changeAmount, m_currency.defaultDustThreshold(),
-          [&changeAmounts](uint64_t chunk)
-          { changeAmounts.push_back(chunk); },
-          [&changeAmounts](uint64_t dust)
-          { changeAmounts.push_back(dust); });
+          [&changeOutputs, this](uint64_t chunk)
+          { changeOutputs.emplace_back(&m_mainAddress, chunk); },
+          [&changeOutputs, this](uint64_t dust)
+          { changeOutputs.emplace_back(&m_mainAddress, dust); });
 
-      for (auto ca : changeAmounts)
-        tx->addOutput(ca, m_mainAddress);
+      std::shuffle(changeOutputs.begin(), changeOutputs.end(),
+                   std::default_random_engine{
+                       crypto::rand<std::default_random_engine::result_type>()});
+      std::sort(changeOutputs.begin(), changeOutputs.end(),
+                [](const AmountToAddress &left, const AmountToAddress &right)
+                { return left.second < right.second; });
+
+      for (const auto &changeOutput : changeOutputs)
+        tx->addOutput(changeOutput.second, *changeOutput.first);
     }
 
-    // The caller handles signing and relaying
-    result.txHash = common::podToHex(tx->getTransactionHash());
-    result.fee = fee;
-    result.success = true;
-
+    result = m_txBuilder.fundKeyInputs(tx, selection.outputs, 0);
+    if (result.success)
+      result.fee = fee;
     return result;
   }
 
-  TransferResult DepositManager::withdrawDeposit(uint64_t depositId,
-                                                 const std::vector<OutputInfo> &availableOutputs,
-                                                 const std::vector<DepositInfo> &deposits)
+  TransferResult DepositManager::withdrawDeposit(const OutputInfo &depositOutput,
+                                                 const DepositInfo &deposit)
   {
     TransferResult result;
     result.success = false;
 
-    if (depositId >= deposits.size())
+    if (deposit.locked)
     {
-      result.error = "Deposit not found";
+      result.error = "Deposit is still locked";
       return result;
     }
 
-    const auto &deposit = deposits[depositId];
-    uint64_t fee = m_currency.minimumFee();
-    uint64_t totalAmount = deposit.amount + deposit.interest;
+    if (!depositOutput.isDeposit || depositOutput.spent)
+    {
+      result.error = "Deposit output is not available";
+      return result;
+    }
 
-    // Build withdrawal transaction
+    if (!depositOutput.hasGlobalOutputIndex || depositOutput.blockHeight == 0)
+    {
+      result.error = "Missing global output index on deposit (wait for sync or rescan wallet)";
+      return result;
+    }
+
+    const uint32_t globalOutputIndex = depositOutput.globalOutputIndex;
+
+    const uint64_t fee = m_currency.minimumFeeV2();
+    const uint64_t totalAmount = deposit.amount + deposit.interest;
+
     std::unique_ptr<cn::ITransaction> tx = cn::createTransaction();
     tx->setUnlockTime(0);
 
-    // Add multisig input for the deposit
     cn::MultisignatureInput msInput;
     msInput.amount = deposit.amount;
     msInput.signatureCount = 1;
-    msInput.outputIndex = 0; // Will be set from deposit info
+    msInput.outputIndex = globalOutputIndex;
     msInput.term = deposit.term;
     tx->addInput(msInput);
 
-    // Add output
     std::vector<uint64_t> outputAmounts;
     cn::decompose_amount_into_digits(
         totalAmount - fee, m_currency.defaultDustThreshold(),
@@ -124,13 +150,18 @@ namespace BoltCore
         [&outputAmounts](uint64_t dust)
         { outputAmounts.push_back(dust); });
 
-    for (auto a : outputAmounts)
-      tx->addOutput(a, m_mainAddress);
+    for (auto outputAmount : outputAmounts)
+      tx->addOutput(outputAmount, m_txBuilder.accountKeys().address);
 
-    result.txHash = common::podToHex(tx->getTransactionHash());
-    result.fee = fee;
-    result.success = true;
+    tx->signInputMultisignature(0, depositOutput.txPublicKey, depositOutput.outputIndex,
+                               m_txBuilder.accountKeys());
 
+    result = m_txBuilder.finalizeAndRelay(*tx);
+    if (result.success)
+    {
+      result.fee = fee;
+      result.spentInputs = {depositOutput};
+    }
     return result;
   }
 }

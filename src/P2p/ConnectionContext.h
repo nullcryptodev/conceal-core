@@ -22,46 +22,46 @@ namespace cn {
 
 struct CryptoNoteConnectionContext {
   uint8_t version;
-  boost::uuids::uuid m_connection_id;
-  uint32_t m_remote_ip = 0;
-  uint32_t m_remote_port = 0;
-  bool m_is_income = false;
+  boost::uuids::uuid m_connectionId;
+  uint32_t m_remoteIp = 0;
+  uint32_t m_remotePort = 0;
+  bool m_isIncoming = false;
   time_t m_started = 0;
 
   enum state {
-    state_befor_handshake = 0, //default state
-    state_synchronizing,
-    state_idle,
-    state_normal,
-    state_sync_required,
-    state_pool_sync_required,
-    state_shutdown
+    stateBeforeHandshake = 0, //default state
+    stateSynchronizing,
+    stateIdle,
+    stateNormal,
+    stateSyncRequired,
+    statePoolSyncRequired,
+    stateShutdown
   };
 
-  state m_state = state_befor_handshake;
-  boost::optional<PendingLiteBlock> m_pending_lite_block;
-  std::list<crypto::Hash> m_needed_objects;
-  std::unordered_set<crypto::Hash> m_requested_objects;
-  uint32_t m_remote_blockchain_height = 0;
-  uint32_t m_last_response_height = 0;
+  state m_state = stateBeforeHandshake;
+  boost::optional<PendingLiteBlock> m_pendingLiteBlock;
+  std::list<crypto::Hash> m_neededObjects;
+  std::unordered_set<crypto::Hash> m_requestedObjects;
+  uint32_t m_remoteBlockchainHeight = 0;
+  uint32_t m_lastResponseHeight = 0;
 };
 
 inline std::string get_protocol_state_string(CryptoNoteConnectionContext::state s) {
   switch (s)  {
-  case CryptoNoteConnectionContext::state_befor_handshake:
-    return "state_befor_handshake";
-  case CryptoNoteConnectionContext::state_synchronizing:
-    return "state_synchronizing";
-  case CryptoNoteConnectionContext::state_idle:
-    return "state_idle";
-  case CryptoNoteConnectionContext::state_normal:
-    return "state_normal";
-  case CryptoNoteConnectionContext::state_sync_required:
-    return "state_sync_required";
-  case CryptoNoteConnectionContext::state_pool_sync_required:
-    return "state_pool_sync_required";
-  case CryptoNoteConnectionContext::state_shutdown:
-    return "state_shutdown";
+  case CryptoNoteConnectionContext::stateBeforeHandshake:
+    return "stateBeforeHandshake";
+  case CryptoNoteConnectionContext::stateSynchronizing:
+    return "stateSynchronizing";
+  case CryptoNoteConnectionContext::stateIdle:
+    return "stateIdle";
+  case CryptoNoteConnectionContext::stateNormal:
+    return "stateNormal";
+  case CryptoNoteConnectionContext::stateSyncRequired:
+    return "stateSyncRequired";
+  case CryptoNoteConnectionContext::statePoolSyncRequired:
+    return "statePoolSyncRequired";
+  case CryptoNoteConnectionContext::stateShutdown:
+    return "stateShutdown";
   default:
     return "unknown";
   }
@@ -71,7 +71,7 @@ inline std::string get_protocol_state_string(CryptoNoteConnectionContext::state 
 
 namespace std {
 inline std::ostream& operator << (std::ostream& s, const cn::CryptoNoteConnectionContext& context) {
-  return s << "[" << common::ipAddressToString(context.m_remote_ip) << ":" << 
-    context.m_remote_port << (context.m_is_income ? " INC" : " OUT") << "] ";
+  return s << "[" << common::ipAddressToString(context.m_remoteIp) << ":" << 
+    context.m_remotePort << (context.m_isIncoming ? " INC" : " OUT") << "] ";
 }
 }

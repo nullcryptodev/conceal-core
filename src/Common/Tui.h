@@ -9,6 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <functional>
+#include <cstdlib>
 
 namespace Tui
 {
@@ -37,6 +38,10 @@ namespace Tui
   inline std::string brightMagenta() { return "\033[95m"; }
   inline std::string brightCyan() { return "\033[96m"; }
   inline std::string brightWhite() { return "\033[97m"; }
+
+  // Brand accents (256-color; terminals without 256-color may fall back gracefully)
+  inline std::string orange() { return "\033[38;5;208m"; }
+  inline std::string accentGreen() { return "\033[38;5;82m"; }
 
   // Background colors
   inline std::string bgBlack() { return "\033[40m"; }
@@ -72,21 +77,24 @@ namespace Tui
 
   // ── Terminal size ───────────────────────────────────────────────────────
 
-  inline int terminalWidth()
+  inline int parseTerminalDimension(const char *value, int fallback)
   {
-    const char *cols = std::getenv("COLUMNS");
-    if (cols)
-      return std::stoi(cols);
-    return 80;
+    if (!value || !*value)
+      return fallback;
+    try
+    {
+      const int dim = std::stoi(value);
+      if (dim >= 1)
+        return dim;
+    }
+    catch (...)
+    {
+    }
+    return fallback;
   }
 
-  inline int terminalHeight()
-  {
-    const char *rows = std::getenv("LINES");
-    if (rows)
-      return std::stoi(rows);
-    return 24;
-  }
+  int terminalWidth();
+  int terminalHeight();
 
   // ── Box drawing characters ──────────────────────────────────────────────
 
@@ -262,9 +270,11 @@ namespace Tui
     {
       result += " " + title + " ";
     }
-    int remaining = width - 2 - static_cast<int>(title.empty() ? 0 : title.size() + 2);
+    int remaining = width - 3;
+    if (!title.empty())
+      remaining -= static_cast<int>(title.size() + 2);
     if (remaining > 0)
-      result += std::string(remaining, h[0]);
+      result += std::string(static_cast<size_t>(remaining), h[0]);
     result += tr;
 
     // Sides
@@ -276,16 +286,35 @@ namespace Tui
 
     // Bottom border
     result += cursorTo(top + height - 1, left);
-    result += bl + std::string(width - 2, h[0]) + br;
+    if (width > 2)
+      result += bl + std::string(static_cast<size_t>(width - 2), h[0]) + br;
+    else
+      result += bl + br;
 
     return result;
   }
 
   // ── Input helpers ───────────────────────────────────────────────────────
 
+  // Virtual key codes returned by readKey() for arrow keys (ANSI escape sequences).
+  constexpr int KEY_UP = 1000;
+  constexpr int KEY_DOWN = 1001;
+  constexpr int KEY_RIGHT = 1002;
+  constexpr int KEY_LEFT = 1003;
+  constexpr int KEY_HOME = 1004;
+  constexpr int KEY_END = 1005;
+  constexpr int KEY_ESC = 27;
+  constexpr int KEY_BACKSPACE = 127;
+  constexpr int KEY_DEL = 8;
+  constexpr int KEY_ENTER = '\r';
+  constexpr int KEY_LF = '\n';
+
   void enableRawMode();
   void disableRawMode();
   bool keyAvailable();
   int readKey();
+
+  // Runs work on a background thread while animating message + spinner (alt screen).
+  void runWithStatusSpinner(const std::string &message, const std::function<void()> &work);
 
 } // namespace Tui

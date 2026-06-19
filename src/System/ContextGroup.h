@@ -7,7 +7,17 @@
 
 #pragma once
 
+#if __has_include(<System/Dispatcher.h>)
 #include <System/Dispatcher.h>
+#else
+#if defined(__linux__)
+#include "../Platform/Linux/System/Dispatcher.h"
+#elif defined(__APPLE__)
+#include "../Platform/OSX/System/Dispatcher.h"
+#elif defined(_WIN32)
+#include "../Platform/Windows/System/Dispatcher.h"
+#endif
+#endif
 
 namespace platform_system {
 
@@ -24,8 +34,8 @@ public:
   void wait();
 
 private:
-  Dispatcher* dispatcher;
-  NativeContextGroup contextGroup;
+  Dispatcher* m_dispatcher;
+  NativeContextGroup m_contextGroup;
 };
 
 }

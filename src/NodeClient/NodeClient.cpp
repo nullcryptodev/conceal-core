@@ -10,6 +10,11 @@
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "Serialization/BinaryInputStreamSerializer.h"
 #include "Serialization/BinaryOutputStreamSerializer.h"
+#include "Serialization/SerializationTools.h"
+#include "Serialization/SerializationTools.h"
+#include "Rpc/CoreRpcServerCommandsDefinitions.h"
+#include "CryptoNoteCore/TransactionApi.h"
+#include "CryptoNoteConfig.h"
 
 #include <cstring>
 #include <sstream>
@@ -219,6 +224,311 @@ namespace NodeClient
       }
     }
 
+    template <typename Request, typename Response>
+    bool jsonCommand(const std::string &host, uint16_t port, const std::string &url,
+                     const Request &req, Response &res,
+                     int connectTimeoutMs = 5000, int recvTimeoutMs = 10000)
+    {
+      BoltHttp::HttpClient client(host, port);
+      const BoltHttp::HttpClientResponse response =
+          client.post(url, storeToJson(req), "application/json", connectTimeoutMs, recvTimeoutMs);
+      if (!response.success || response.statusCode != 200)
+        return false;
+      if (!loadFromJson(res, response.body))
+        return false;
+      return res.status == cn::CORE_RPC_STATUS_OK;
+    }
+
+    template <typename Request, typename Response>
+    bool binaryCommand(const std::string &host, uint16_t port, const std::string &url,
+                       const Request &req, Response &res,
+                       int connectTimeoutMs = 5000, int recvTimeoutMs = 10000,
+                       std::string *errorOut = nullptr)
+    {
+      if (errorOut)
+        errorOut->clear();
+      BoltHttp::HttpClient client(host, port);
+      const BoltHttp::HttpClientResponse response =
+          client.post(url, storeToBinaryKeyValue(req), "application/octet-stream",
+                      connectTimeoutMs, recvTimeoutMs);
+      if (!response.success || response.statusCode != 200)
+      {
+        if (errorOut)
+        {
+          if (!response.error.empty())
+            *errorOut = response.error;
+          else if (response.statusCode == 500 && !response.body.empty())
+            *errorOut = response.body;
+          else
+            *errorOut = "HTTP " + std::to_string(response.statusCode);
+        }
+        return false;
+      }
+      if (!loadFromBinaryKeyValue(res, response.body))
+      {
+        if (errorOut)
+          *errorOut = "Failed to parse binary RPC response";
+        return false;
+      }
+      if (res.status != cn::CORE_RPC_STATUS_OK)
+      {
+        if (errorOut)
+          *errorOut = "Daemon status: " + res.status;
+        return false;
+      }
+      return true;
+    }
+
+    bool fetchPoolTransactionSync(const std::string &host, uint16_t port,
+                                  const crypto::Hash &txHash, cn::Transaction &tx)
+    {
+      cn::COMMAND_RPC_GET_POOL_CHANGES_LITE::request req{};
+      cn::COMMAND_RPC_GET_POOL_CHANGES_LITE::response rsp{};
+      req.tailBlockId = cn::NULL_HASH;
+
+      if (binaryCommand(host, port, "/get_pool_changes_lite.bin", req, rsp))
+      {
+        for (const auto &tpi : rsp.addedTxs)
+        {
+          if (tpi.txHash == txHash)
+          {
+            static_cast<cn::TransactionPrefix &>(tx) = tpi.txPrefix;
+            return true;
+          }
+        }
+      }
+
+      cn::COMMAND_RPC_GET_RAW_TRANSACTIONS_POOL::request poolReq;
+      cn::COMMAND_RPC_GET_RAW_TRANSACTIONS_POOL::response poolResp;
+      if (!jsonCommand(host, port, "/getrawtransactionspool", poolReq, poolResp))
+        return false;
+
+      for (const auto &entry : poolResp.transactions)
+      {
+        if (entry.hash == txHash)
+        {
+          static_cast<cn::TransactionPrefix &>(tx) = entry.transaction;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    bool fetchRandomOutsJson(const std::string &host, uint16_t port,
+                             const std::vector<uint64_t> &amounts, uint64_t outsCount,
+                             std::vector<cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount> &result,
+                             std::string &errorOut, int recvTimeoutMs = 120000)
+    {
+      errorOut.clear();
+      cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_JSON::request req;
+      cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_JSON::response rsp;
+      req.amounts = amounts;
+      req.outs_count = outsCount;
+
+      BoltHttp::HttpClient client(host, port);
+      const BoltHttp::HttpClientResponse response =
+          client.post("/getrandom_outs", storeToJson(req), "application/json", 5000, recvTimeoutMs);
+      if (!response.success || response.statusCode != 200)
+      {
+        if (!response.error.empty())
+          errorOut = response.error;
+        else if (response.statusCode == 500 && !response.body.empty())
+          errorOut = response.body;
+        else
+          errorOut = "HTTP " + std::to_string(response.statusCode);
+        return false;
+      }
+      if (!loadFromJson(rsp, response.body))
+      {
+        errorOut = "Failed to parse getrandom_outs JSON response";
+        return false;
+      }
+      if (rsp.status != cn::CORE_RPC_STATUS_OK)
+      {
+        errorOut = "Daemon getrandom_outs status: " + rsp.status;
+        return false;
+      }
+
+      result.clear();
+      result.reserve(rsp.outs.size());
+      for (const auto &jentry : rsp.outs)
+      {
+        cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount entry;
+        entry.amount = jentry.amount;
+        entry.outs.reserve(jentry.outs.size());
+        for (const auto &jo : jentry.outs)
+        {
+          cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::out_entry oe;
+          oe.global_amount_index = jo.global_amount_index;
+          oe.out_key = jo.out_key;
+          entry.outs.push_back(oe);
+        }
+        result.push_back(std::move(entry));
+      }
+      return true;
+    }
+
+    bool isTransactionInBlockchain(const std::string &host, uint16_t port,
+                                   const crypto::Hash &txHash, int recvTimeoutMs)
+    {
+      const std::string txidHex = common::podToHex(txHash);
+      const std::string params = R"({"hash":")" + txidHex + R"("})";
+
+      try
+      {
+        std::ostringstream body;
+        body << R"({"jsonrpc":"2.0","id":1,"method":"f_transaction_json","params":)" << params
+             << "}";
+
+        BoltHttp::HttpClient client(host, port);
+        const BoltHttp::HttpClientResponse response =
+            client.post("/json_rpc", body.str(), "application/json", 5000, recvTimeoutMs);
+        if (!response.success || response.statusCode != 200)
+          return false;
+
+        if (!extractError(response.body).empty())
+          return false;
+
+        const std::string result = extractResult(response.body);
+        if (result.empty())
+          return false;
+
+        const std::string blockKey = "\"block\":";
+        const size_t blockPos = result.find(blockKey);
+        if (blockPos == std::string::npos)
+          return false;
+
+        size_t pos = blockPos + blockKey.size();
+        while (pos < result.size() && (result[pos] == ' ' || result[pos] == '\t' || result[pos] == '\n'))
+          ++pos;
+        if (pos >= result.size() || result[pos] == 'n')
+          return false;
+
+        const std::string hashKey = "\"hash\":\"";
+        const size_t hashPos = result.find(hashKey, pos);
+        if (hashPos == std::string::npos || hashPos > pos + 512)
+          return false;
+
+        const size_t valueStart = hashPos + hashKey.size();
+        return valueStart < result.size() && result[valueStart] != '"';
+      }
+      catch (...)
+      {
+        return false;
+      }
+    }
+
+    bool parseOIndexesFromJson(const std::string &json, std::vector<uint32_t> &indices)
+    {
+      size_t pos = json.find("\"o_indexes\"");
+      if (pos == std::string::npos)
+        return false;
+      pos = json.find('[', pos);
+      if (pos == std::string::npos)
+        return false;
+      ++pos;
+
+      indices.clear();
+      while (pos < json.size())
+      {
+        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == ','))
+          ++pos;
+        if (pos >= json.size() || json[pos] == ']')
+          break;
+        char *end = nullptr;
+        const uint64_t value = std::strtoull(json.c_str() + pos, &end, 10);
+        if (end == json.c_str() + pos)
+          break;
+        indices.push_back(static_cast<uint32_t>(value));
+        pos = static_cast<size_t>(end - json.c_str());
+      }
+      return !indices.empty();
+    }
+
+    bool fetchTxGlobalOutputIndexesJson(const std::string &host, uint16_t port,
+                                        const crypto::Hash &txHash,
+                                        std::vector<uint32_t> &indices,
+                                        std::string &errorOut, int recvTimeoutMs)
+    {
+      errorOut.clear();
+      const std::string txidHex = common::podToHex(txHash);
+      const std::string params = R"({"txid":")" + txidHex + R"("})";
+
+      static const char *kMethods[] = {
+          "get_tx_global_output_indexes",
+          "get_o_indexes",
+          nullptr};
+
+      for (const char **method = kMethods; *method != nullptr; ++method)
+      {
+        try
+        {
+          std::ostringstream body;
+          body << R"({"jsonrpc":"2.0","id":1,"method":")" << *method
+               << R"(","params":)" << params << "}";
+
+          BoltHttp::HttpClient client(host, port);
+          const BoltHttp::HttpClientResponse response =
+              client.post("/json_rpc", body.str(), "application/json", 5000, recvTimeoutMs);
+          if (!response.success || response.statusCode != 200)
+            continue;
+
+          if (!extractError(response.body).empty())
+            continue;
+
+          const std::string result = extractResult(response.body);
+          if (result.empty())
+            continue;
+
+          if (parseOIndexesFromJson(result, indices))
+            return true;
+        }
+        catch (...)
+        {
+        }
+      }
+
+      errorOut = "JSON fallback for global output indexes failed";
+      return false;
+    }
+
+    bool fetchTxGlobalOutputIndexes(const std::string &host, uint16_t port,
+                                    const crypto::Hash &txHash,
+                                    std::vector<uint32_t> &indices,
+                                    std::string &errorOut,
+                                    int connectMs = 5000, int recvMs = 30000)
+    {
+      errorOut.clear();
+
+      // Global output indices exist only for txs included in a block. Skip get_o_indexes
+      // for mempool/missing txs so the daemon does not log get_tx_outputs_gindexs warnings.
+      if (!isTransactionInBlockchain(host, port, txHash, recvMs))
+      {
+        errorOut = "Transaction not in blockchain";
+        return false;
+      }
+
+      cn::COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES::request req;
+      cn::COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES::response rsp;
+      req.txid = txHash;
+
+      if (binaryCommand(host, port, "/get_o_indexes.bin", req, rsp, connectMs, recvMs, &errorOut))
+      {
+        indices.clear();
+        indices.reserve(rsp.o_indexes.size());
+        for (auto idx : rsp.o_indexes)
+          indices.push_back(static_cast<uint32_t>(idx));
+        return true;
+      }
+
+      if (fetchTxGlobalOutputIndexesJson(host, port, txHash, indices, errorOut, recvMs))
+        return true;
+
+      if (errorOut.empty())
+        errorOut = "Failed to fetch global output indexes from daemon";
+      return false;
+    }
+
     // ─── JSON parsers ───────────────────────────────────────────────────
 
     cn::TransactionDetails parseTransactionDetails(const std::string &json)
@@ -344,6 +654,12 @@ namespace NodeClient
       return entry;
     }
 
+    bool isLoopbackHost(const std::string &host)
+    {
+      return host == "127.0.0.1" || host == "localhost" || host == "::1" ||
+             host == "0:0:0:0:0:0:0:1";
+    }
+
   } // anonymous namespace
 
   // ─── Constructor / Destructor ────────────────────────────────────────────
@@ -362,21 +678,25 @@ namespace NodeClient
 
   bool NodeClient::init()
   {
-    std::string result = jsonRpcCall("getblockcount", "{}");
-    if (result.empty())
+    // Legacy entry point — do not block startup; use connectToDaemon() from background.
+    return connectToDaemon();
+  }
+
+  bool NodeClient::connectToDaemon()
+  {
+    if (!refreshBlockHeight(5000, 10000))
     {
       m_connected.store(false);
       return false;
     }
 
-    uint64_t count = 0;
-    jsonGetUint(result, "count", count);
-    m_lastLocalBlockHeight = static_cast<uint32_t>(count);
-    m_lastKnownBlockHeight = m_lastLocalBlockHeight;
-    m_lastLocalBlockTimestamp = 0;
-    m_peerCount = 0;
     m_connected.store(true);
     return true;
+  }
+
+  std::string NodeClient::endpoint() const
+  {
+    return m_host + ":" + std::to_string(m_port);
   }
 
   bool NodeClient::shutdown()
@@ -393,7 +713,9 @@ namespace NodeClient
   // ─── JSON-RPC helper ─────────────────────────────────────────────────────
 
   std::string NodeClient::jsonRpcCall(const std::string &method,
-                                      const std::string &paramsJson)
+                                      const std::string &paramsJson,
+                                      int connectTimeoutMs,
+                                      int recvTimeoutMs)
   {
     try
     {
@@ -402,7 +724,8 @@ namespace NodeClient
            << R"(","params":)" << paramsJson << "}";
 
       BoltHttp::HttpClient client(m_host, m_port);
-      BoltHttp::HttpClientResponse response = client.post("/json_rpc", body.str());
+      BoltHttp::HttpClientResponse response =
+          client.post("/json_rpc", body.str(), "application/json", connectTimeoutMs, recvTimeoutMs);
 
       if (!response.success || response.statusCode != 200)
         return "";
@@ -434,14 +757,43 @@ namespace NodeClient
 
   size_t NodeClient::getPeerCount() const { return m_peerCount; }
 
+  bool NodeClient::refreshBlockHeight(int connectTimeoutMs, int recvTimeoutMs)
+  {
+    const auto now = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      if (m_connected.load() && m_lastHeightRefresh.time_since_epoch().count() != 0 &&
+          now - m_lastHeightRefresh < std::chrono::seconds(5))
+        return m_lastKnownBlockHeight > 0;
+    }
+
+    std::string result = jsonRpcCall("getblockcount", "{}", connectTimeoutMs, recvTimeoutMs);
+    if (result.empty())
+      return false;
+
+    uint64_t count = 0;
+    if (!jsonGetUint(result, "count", count))
+      return false;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_lastLocalBlockHeight = static_cast<uint32_t>(count);
+    m_lastKnownBlockHeight = m_lastLocalBlockHeight;
+    m_lastHeightRefresh = now;
+    return true;
+  }
+
   uint32_t NodeClient::getLastLocalBlockHeight() const
   {
+    if (m_connected.load())
+      const_cast<NodeClient *>(this)->refreshBlockHeight();
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_lastLocalBlockHeight;
   }
 
   uint32_t NodeClient::getLastKnownBlockHeight() const
   {
+    if (m_connected.load())
+      const_cast<NodeClient *>(this)->refreshBlockHeight();
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_lastKnownBlockHeight;
   }
@@ -462,14 +814,29 @@ namespace NodeClient
   {
     try
     {
-      std::string txHex = transactionToHex(transaction);
-      std::string params = R"({"tx":")" + txHex + R"("})";
-      std::string result = jsonRpcCall("relayTransaction", params);
+      cn::COMMAND_RPC_SEND_RAW_TX::request req;
+      cn::COMMAND_RPC_SEND_RAW_TX::response rsp;
+      req.tx_as_hex = transactionToHex(transaction);
 
-      if (result.empty())
+      BoltHttp::HttpClient client(m_host, m_port);
+      const BoltHttp::HttpClientResponse response =
+          client.post("/sendrawtransaction", storeToJson(req), "application/json", 5000, 30000);
+      if (!response.success || response.statusCode != 200)
+      {
         callback(std::make_error_code(std::errc::io_error));
-      else
-        callback(std::error_code());
+        return;
+      }
+      if (!loadFromJson(rsp, response.body))
+      {
+        callback(std::make_error_code(std::errc::io_error));
+        return;
+      }
+      if (rsp.status != cn::CORE_RPC_STATUS_OK)
+      {
+        callback(std::make_error_code(std::errc::invalid_argument));
+        return;
+      }
+      callback(std::error_code());
     }
     catch (...)
     {
@@ -485,66 +852,53 @@ namespace NodeClient
       std::vector<cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount> &result,
       const Callback &callback)
   {
+    constexpr int kConnectMs = 2000;
+    constexpr int kRecvMs = 20000;
+
     try
     {
-      std::string amountsStr = "[";
-      for (size_t i = 0; i < amounts.size(); ++i)
+      cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::request req;
+      cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::response rsp;
+      req.amounts = amounts;
+      req.outs_count = outsCount;
+
+      std::string rpcError;
+
+      // Local daemon: JSON /getrandom_outs first (same path most web wallets use).
+      if (isLoopbackHost(m_host))
       {
-        if (i > 0)
-          amountsStr += ",";
-        amountsStr += std::to_string(amounts[i]);
+        if (fetchRandomOutsJson(m_host, m_port, req.amounts, outsCount, result, rpcError, kRecvMs))
+        {
+          callback(std::error_code());
+          return;
+        }
       }
-      amountsStr += "]";
 
-      std::string params = R"({"amounts":)" + amountsStr +
-                           R"(,"outsCount":)" + std::to_string(outsCount) + "}";
-
-      std::string response = jsonRpcCall("getRandomOutsByAmounts", params);
-      if (response.empty())
+      if (binaryCommand(m_host, m_port, "/getrandom_outs.bin", req, rsp,
+                        kConnectMs, kRecvMs, &rpcError))
       {
-        callback(std::make_error_code(std::errc::io_error));
+        result = std::move(rsp.outs);
+        callback(std::error_code());
         return;
       }
 
-      result.clear();
-
-      std::string outsArr = jsonExtractArray(response, "outs");
-      if (outsArr.empty())
+      if (fetchRandomOutsJson(m_host, m_port, req.amounts, outsCount, result, rpcError, kRecvMs))
       {
         callback(std::error_code());
         return;
       }
 
-      std::vector<std::string> amountObjs = jsonSplitObjects(outsArr);
-      for (const auto &obj : amountObjs)
-      {
-        cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount ofa;
+      std::error_code ec;
+      if (rpcError.find("Failed to connect") != std::string::npos)
+        ec = std::make_error_code(std::errc::connection_refused);
+      else if (rpcError.find("Core is busy") != std::string::npos)
+        ec = std::make_error_code(std::errc::resource_unavailable_try_again);
+      else if (rpcError.find("Daemon") != std::string::npos || rpcError.find("HTTP 5") != std::string::npos)
+        ec = std::make_error_code(std::errc::protocol_error);
+      else
+        ec = std::make_error_code(std::errc::io_error);
 
-        uint64_t amt = 0;
-        jsonGetUint(obj, "amount", amt);
-        ofa.amount = amt;
-
-        std::string outArr = jsonExtractArray(obj, "outs");
-        std::vector<std::string> outObjs = jsonSplitObjects(outArr);
-        for (const auto &outObj : outObjs)
-        {
-          cn::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::out_entry entry;
-
-          uint64_t idx = 0;
-          jsonGetUint(outObj, "global_index", idx);
-          entry.global_amount_index = idx;
-
-          std::string keyHex = jsonGetHexString(outObj, "public_key");
-          if (!keyHex.empty() && keyHex.size() == 64)
-            common::podFromHex(keyHex, entry.out_key);
-
-          ofa.outs.push_back(entry);
-        }
-
-        result.push_back(ofa);
-      }
-
-      callback(std::error_code());
+      callback(ec);
     }
     catch (...)
     {
@@ -652,34 +1006,14 @@ namespace NodeClient
   {
     try
     {
-      std::string hashHex = common::podToHex(transactionHash);
-      std::string params = R"({"transactionHash":")" + hashHex + R"("})";
-      std::string response = jsonRpcCall("getTransactionOutsGlobalIndices", params);
-
-      if (response.empty())
+      std::string rpcError;
+      if (!fetchTxGlobalOutputIndexes(m_host, m_port, transactionHash, outsGlobalIndices, rpcError))
       {
-        callback(std::make_error_code(std::errc::io_error));
+        if (rpcError.find("Failed to connect") != std::string::npos)
+          callback(std::make_error_code(std::errc::connection_refused));
+        else
+          callback(std::make_error_code(std::errc::io_error));
         return;
-      }
-
-      outsGlobalIndices.clear();
-      std::string indicesArr = jsonExtractArray(response, "outsGlobalIndices");
-      if (!indicesArr.empty())
-      {
-        size_t pos = 0;
-        while (pos < indicesArr.size())
-        {
-          while (pos < indicesArr.size() && (indicesArr[pos] == ',' || indicesArr[pos] == ' ' || indicesArr[pos] == '\n'))
-            ++pos;
-          if (pos >= indicesArr.size())
-            break;
-          char *end = nullptr;
-          unsigned long val = std::strtoul(indicesArr.c_str() + pos, &end, 10);
-          if (end == indicesArr.c_str() + pos)
-            break;
-          outsGlobalIndices.push_back(static_cast<uint32_t>(val));
-          pos = end - indicesArr.c_str();
-        }
       }
 
       callback(std::error_code());
@@ -750,44 +1084,23 @@ namespace NodeClient
   {
     try
     {
-      std::string idsStr = "[";
-      for (size_t i = 0; i < knownPoolTxIds.size(); ++i)
-      {
-        if (i > 0)
-          idsStr += ",";
-        idsStr += "\"" + common::podToHex(knownPoolTxIds[i]) + "\"";
-      }
-      idsStr += "]";
+      cn::COMMAND_RPC_GET_POOL_CHANGES_LITE::request req{};
+      cn::COMMAND_RPC_GET_POOL_CHANGES_LITE::response rsp{};
+      req.tailBlockId = knownBlockId;
+      req.knownTxsIds = std::move(knownPoolTxIds);
 
-      std::string params = R"({"knownPoolTxIds":)" + idsStr +
-                           R"(,"knownBlockId":")" + common::podToHex(knownBlockId) + R"("})";
-
-      std::string response = jsonRpcCall("getPoolSymmetricDifference", params);
-      if (response.empty())
+      if (!binaryCommand(m_host, m_port, "/get_pool_changes_lite.bin", req, rsp))
       {
         callback(std::make_error_code(std::errc::io_error));
         return;
       }
 
-      uint64_t bcActual = 0;
-      jsonGetUint(response, "isBcActual", bcActual);
-      isBcActual = (bcActual != 0);
-
+      isBcActual = rsp.isTailBlockActual;
+      deletedTxIds = std::move(rsp.deletedTxsIds);
       newTxs.clear();
-      deletedTxIds.clear();
-
-      std::string deletedArr = jsonExtractArray(response, "deletedTxIds");
-      std::vector<std::string> deletedStrs = jsonSplitObjects(deletedArr);
-      for (const auto &s : deletedStrs)
-      {
-        crypto::Hash h;
-        std::string hex = jsonGetString(s, "hash");
-        if (!hex.empty() && hex.size() == 64)
-        {
-          common::podFromHex(hex, h);
-          deletedTxIds.push_back(h);
-        }
-      }
+      newTxs.reserve(rsp.addedTxs.size());
+      for (const auto &tpi : rsp.addedTxs)
+        newTxs.push_back(createTransactionPrefix(tpi.txPrefix, tpi.txHash));
 
       callback(std::error_code());
     }
@@ -1022,7 +1335,22 @@ namespace NodeClient
   std::vector<crypto::Hash> NodeClient::getPoolTransactions()
   {
     std::vector<crypto::Hash> result;
-    std::string response = jsonRpcCall("getPoolTransactions", "{}");
+
+    // Same path as WalletGreen / NodeRpcProxy: /get_pool_changes_lite.bin
+    cn::COMMAND_RPC_GET_POOL_CHANGES_LITE::request req{};
+    cn::COMMAND_RPC_GET_POOL_CHANGES_LITE::response rsp{};
+    req.tailBlockId = cn::NULL_HASH;
+
+    if (binaryCommand(m_host, m_port, "/get_pool_changes_lite.bin", req, rsp))
+    {
+      result.reserve(rsp.addedTxs.size());
+      for (const auto &tpi : rsp.addedTxs)
+        result.push_back(tpi.txHash);
+      return result;
+    }
+
+    // Fallback when binary pool RPC is unavailable.
+    std::string response = jsonRpcCall("f_on_transactions_pool_json", "{}");
     if (response.empty())
       return result;
 
@@ -1044,19 +1372,86 @@ namespace NodeClient
 
   bool NodeClient::getTransactionSync(const crypto::Hash &txHash, cn::Transaction &tx)
   {
-    std::string hashHex = common::podToHex(txHash);
-    std::string params = R"({"hash":")" + hashHex + R"("})";
-    std::string result = jsonRpcCall("getTransaction", params);
-    if (result.empty())
+    cn::COMMAND_RPC_GET_TRANSACTIONS::request req;
+    cn::COMMAND_RPC_GET_TRANSACTIONS::response resp;
+    req.txs_hashes.push_back(common::podToHex(txHash));
+
+    if (jsonCommand(m_host, m_port, "/gettransactions", req, resp) &&
+        resp.missed_tx.empty() && !resp.txs_as_hex.empty())
+      return transactionFromHex(resp.txs_as_hex[0], tx);
+
+    // /gettransactions only searches the blockchain (checkTxPool=false on daemon).
+    return fetchPoolTransactionSync(m_host, m_port, txHash, tx);
+  }
+
+  bool NodeClient::getTransactionsAtHeight(uint32_t height,
+                                           std::vector<cn::Transaction> &transactions,
+                                           std::vector<crypto::Hash> &hashes,
+                                           std::vector<std::vector<uint32_t>> *outputGlobalIndexes)
+  {
+    transactions.clear();
+    hashes.clear();
+    if (outputGlobalIndexes)
+      outputGlobalIndexes->clear();
+
+    cn::COMMAND_RPC_GET_TRANSACTIONS_WITH_OUTPUT_GLOBAL_INDEXES::request req;
+    cn::COMMAND_RPC_GET_TRANSACTIONS_WITH_OUTPUT_GLOBAL_INDEXES::response resp;
+    req.heights.push_back(height);
+    req.include_miner_txs = false;
+    req.range = false;
+
+    if (!jsonCommand(m_host, m_port, "/get_raw_transactions_by_heights", req, resp))
       return false;
 
-    std::string txHex = jsonGetHexString(result, "tx");
-    if (txHex.empty())
-      txHex = jsonGetHexString(result, "transaction");
-    if (txHex.empty())
-      return false;
+    transactions.reserve(resp.transactions.size());
+    hashes.reserve(resp.transactions.size());
+    for (const auto &entry : resp.transactions)
+    {
+      cn::Transaction tx;
+      static_cast<cn::TransactionPrefix &>(tx) = entry.transaction;
+      hashes.push_back(entry.hash);
+      transactions.push_back(std::move(tx));
+      if (outputGlobalIndexes)
+        outputGlobalIndexes->push_back(entry.output_indexes);
+    }
 
-    return transactionFromHex(txHex, tx);
+    return true;
+  }
+
+  bool NodeClient::fetchTransactionDetails(const crypto::Hash &txHash,
+                                           cn::Transaction &transaction,
+                                           uint32_t &blockHeight,
+                                           bool &inBlock)
+  {
+    blockHeight = 0;
+    inBlock = false;
+
+    cn::F_COMMAND_RPC_GET_TRANSACTION_DETAILS::request req;
+    cn::F_COMMAND_RPC_GET_TRANSACTION_DETAILS::response resp;
+    req.hash = common::podToHex(txHash);
+
+    const std::string params = storeToJson(req);
+    const std::string result = jsonRpcCall("f_transaction_json", params);
+    if (!result.empty() && loadFromJson(resp, result) && resp.status == cn::CORE_RPC_STATUS_OK)
+    {
+      transaction = resp.tx;
+      if (!resp.block.hash.empty())
+      {
+        inBlock = true;
+        blockHeight = resp.block.height;
+      }
+      return true;
+    }
+
+    if (fetchPoolTransactionSync(m_host, m_port, txHash, transaction))
+      return true;
+
+    return false;
+  }
+
+  std::string NodeClient::callDaemonMethod(const std::string &method, const std::string &paramsJson)
+  {
+    return jsonRpcCall(method, paramsJson);
   }
 
   // ─── Additional helpers ──────────────────────────────────────────────────

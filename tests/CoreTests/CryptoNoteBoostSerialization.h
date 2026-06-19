@@ -10,6 +10,8 @@
 #include <boost/serialization/variant.hpp>
 #include <boost/serialization/set.hpp>
 #include <boost/serialization/map.hpp>
+#include <boost/serialization/string.hpp>
+#include <boost/serialization/array.hpp>
 #include <boost/foreach.hpp>
 #include <boost/serialization/is_bitwise_serializable.hpp>
 #include "CryptoNoteCore/CryptoNoteBasic.h"
@@ -64,6 +66,47 @@ namespace boost
   template <class Archive> void serialize(Archive& archive, cn::MultisignatureOutput &output, unsigned int version) {
     archive & output.keys;
     archive & output.requiredSignatureCount;
+  }
+
+  template <class Archive> void serialize(Archive& archive, cn::StandardPaymentOutput &output, unsigned int version) {
+    archive & output.view_tag;
+    archive & output.key_index;
+    archive & output.memo_size;
+    archive & output.encrypted_memo;
+    archive & output.key;
+  }
+
+  template <class Archive> void serialize(Archive& archive, cn::MultisigPaymentOutput &output, unsigned int version) {
+    archive & output.view_tag;
+    archive & output.key_index;
+    archive & output.num_keys;
+    archive & output.flags;
+    archive & output.term;
+    archive & output.memo_size;
+    archive & output.encrypted_memo;
+    archive & output.keys;
+  }
+
+  template <class Archive> void serialize(Archive& archive, cn::DomainRegistrationOutput &output, unsigned int version) {
+    archive & output.view_tag;
+    archive & output.key_index;
+    archive & output.domain_len;
+    archive & output.domain;
+    archive & output.tier;
+    archive & output.domain_pub;
+    archive & output.domain_view_pub;
+    archive & output.encrypted_addr_size;
+    archive & output.encrypted_addr;
+    archive & output.metadata_len;
+    archive & output.metadata;
+  }
+
+  template <class Archive> void serialize(Archive& archive, cn::DomainDeletionOutput &output, unsigned int version) {
+    archive & output.view_tag;
+    archive & output.key_index;
+    archive & output.domain_len;
+    archive & output.domain;
+    archive & output.sig;
   }
 
   template <class Archive>

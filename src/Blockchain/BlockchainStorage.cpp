@@ -495,9 +495,10 @@ namespace cn
     if (!m_mdbxStorage)
       return;
 
-    uint32_t top = m_mdbxStorage->topBlockHeight();
-    if (top == 0)
+    if (blocksSize() == 0)
       return;
+
+    uint32_t top = static_cast<uint32_t>(blocksSize() - 1);
 
     // removeCompleteBlock also removes the filter record
     m_mdbxStorage->removeCompleteBlock(top, blockHash);
@@ -508,9 +509,10 @@ namespace cn
 
   bool Blockchain::removeLastBlock()
   {
-    uint32_t top = m_mdbxStorage->topBlockHeight();
-    if (top == 0)
+    if (blocksSize() == 0)
       return false;
+
+    uint32_t top = static_cast<uint32_t>(blocksSize() - 1);
 
     cn::BinaryArray ba;
     if (!m_mdbxStorage->getBlockEntry(top, ba))

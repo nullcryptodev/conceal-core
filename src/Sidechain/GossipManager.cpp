@@ -3,16 +3,27 @@
 // Distributed under the MIT/X11 software license
 
 #include "GossipManager.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+#include "BoltHttp/BoltSocket.hpp"
+
 #include <cstring>
 #include <iostream>
 #include <algorithm>
 
 namespace Sidechain
 {
+  namespace
+  {
+    int sendBytes(int fd, const void *data, size_t len)
+    {
+      return BoltHttp::boltSend(fd, static_cast<const char *>(data), len, BoltHttp::BOLT_MSG_NOSIGNAL);
+    }
+
+    int recvBytes(int fd, void *data, size_t len, int flags)
+    {
+      return BoltHttp::boltRecv(fd, static_cast<char *>(data), len, flags);
+    }
+  } // namespace
+
   GossipManager::GossipManager(uint16_t gossipPort, const std::vector<std::string> &seedNodes)
       : m_port(gossipPort), m_seedNodes(seedNodes), m_serverSocket(-1)
   {
@@ -29,38 +40,42 @@ namespace Sidechain
       return;
     m_running = true;
 
-    // Create server socket
-    m_serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    m_serverSocket = BoltHttp::boltSocket(AF_INET, SOCK_STREAM, 0);
     if (m_serverSocket < 0)
     {
       std::cerr << "GossipManager: Failed to create socket" << std::endl;
       return;
     }
 
-    int opt = 1;
-    setsockopt(m_serverSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (BoltHttp::boltSetReuseAddr(m_serverSocket) != 0)
+    {
+      std::cerr << "GossipManager: Failed to set SO_REUSEADDR" << std::endl;
+      BoltHttp::boltClose(m_serverSocket);
+      m_serverSocket = -1;
+      return;
+    }
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(m_port);
 
-    if (bind(m_serverSocket, (sockaddr *)&addr, sizeof(addr)) < 0)
+    if (BoltHttp::boltBind(m_serverSocket, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0)
     {
       std::cerr << "GossipManager: Failed to bind to port " << m_port << std::endl;
       return;
     }
 
-    listen(m_serverSocket, 10);
+    if (BoltHttp::boltListen(m_serverSocket, 10) < 0)
+    {
+      std::cerr << "GossipManager: Failed to listen on port " << m_port << std::endl;
+      return;
+    }
 
-    // Start accept thread
     m_threads.emplace_back(&GossipManager::acceptLoop, this);
 
-    // Connect to seed nodes
     if (!m_seedNodes.empty())
-    {
       m_threads.emplace_back(&GossipManager::connectToSeeds, this);
-    }
 
     std::cout << "GossipManager: Listening on port " << m_port << std::endl;
   }
@@ -69,29 +84,25 @@ namespace Sidechain
   {
     m_running = false;
 
-    // Close server socket immediately so acceptLoop exits
     if (m_serverSocket >= 0)
     {
-      shutdown(m_serverSocket, SHUT_RDWR);
-      close(m_serverSocket);
+      BoltHttp::boltShutdown(m_serverSocket, BoltHttp::BOLT_SHUT_RDWR);
+      BoltHttp::boltClose(m_serverSocket);
       m_serverSocket = -1;
     }
 
-    // Give acceptLoop a moment to see m_running is false and exit
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Close all peer sockets so readLoop threads wake up
     {
       std::lock_guard<std::mutex> lock(m_peersMutex);
       for (int sock : m_peerSockets)
       {
-        shutdown(sock, SHUT_RDWR);
-        close(sock);
+        BoltHttp::boltShutdown(sock, BoltHttp::BOLT_SHUT_RDWR);
+        BoltHttp::boltClose(sock);
       }
       m_peerSockets.clear();
     }
 
-    // Now join all threads
     for (auto &t : m_threads)
     {
       if (t.joinable())
@@ -108,24 +119,21 @@ namespace Sidechain
     std::cout << "GossipManager::broadcast: sending to " << m_peerSockets.size() << " peers" << std::endl;
     for (int sock : m_peerSockets)
     {
-      uint32_t len = htonl(message.size());
-      ssize_t sent1 = send(sock, &len, sizeof(len), MSG_NOSIGNAL);
-      ssize_t sent2 = send(sock, message.data(), message.size(), MSG_NOSIGNAL);
+      uint32_t len = htonl(static_cast<uint32_t>(message.size()));
+      const int sent1 = sendBytes(sock, &len, sizeof(len));
+      const int sent2 = sendBytes(sock, message.data(), message.size());
       std::cout << "GossipManager::broadcast: sent " << sent1 << "+" << sent2 << " bytes to socket " << sock << std::endl;
 
       if (sent1 <= 0 || sent2 <= 0)
       {
         std::cout << "GossipManager::broadcast: marking socket " << sock << " as dead" << std::endl;
         deadSockets.push_back(sock);
-        close(sock);
+        BoltHttp::boltClose(sock);
       }
     }
 
-    // Remove dead sockets from the peer list
     for (int dead : deadSockets)
-    {
       m_peerSockets.erase(std::remove(m_peerSockets.begin(), m_peerSockets.end(), dead), m_peerSockets.end());
-    }
 
     if (!deadSockets.empty())
       std::cout << "GossipManager::broadcast: cleaned up " << deadSockets.size() << " dead sockets" << std::endl;
@@ -133,25 +141,24 @@ namespace Sidechain
 
   void GossipManager::sendTo(const std::string &host, uint16_t port, const std::vector<uint8_t> &message)
   {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    int sock = BoltHttp::boltSocket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
       return;
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+    BoltHttp::boltInetPton(AF_INET, host.c_str(), &addr.sin_addr);
 
-    if (connect(sock, (sockaddr *)&addr, sizeof(addr)) == 0)
+    if (BoltHttp::boltConnect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0)
     {
-      uint32_t len = htonl(message.size());
-      send(sock, &len, sizeof(len), 0);
-      send(sock, message.data(), message.size(), 0);
+      uint32_t len = htonl(static_cast<uint32_t>(message.size()));
+      sendBytes(sock, &len, sizeof(len));
+      sendBytes(sock, message.data(), message.size());
     }
 
-    // Shutdown before close to prevent epoll errors
-    shutdown(sock, SHUT_RDWR);
-    close(sock);
+    BoltHttp::boltShutdown(sock, BoltHttp::BOLT_SHUT_RDWR);
+    BoltHttp::boltClose(sock);
   }
 
   void GossipManager::onMessage(MessageHandler handler)
@@ -164,25 +171,28 @@ namespace Sidechain
     return m_seedNodes;
   }
 
-  // Private methods
   void GossipManager::acceptLoop()
   {
     while (m_running)
     {
       sockaddr_in clientAddr{};
+#ifdef _WIN32
+      int clientLen = sizeof(clientAddr);
+#else
       socklen_t clientLen = sizeof(clientAddr);
-      int clientSock = accept(m_serverSocket, (sockaddr *)&clientAddr, &clientLen);
+#endif
+      const int clientSock = BoltHttp::boltAccept(
+          m_serverSocket, reinterpret_cast<sockaddr *>(&clientAddr), &clientLen);
 
       if (clientSock < 0)
         continue;
 
       char clientIp[INET_ADDRSTRLEN];
-      inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, INET_ADDRSTRLEN);
-      std::string peerAddr = std::string(clientIp) + ":" + std::to_string(ntohs(clientAddr.sin_port));
+      BoltHttp::boltInetNtop(AF_INET, &clientAddr.sin_addr, clientIp, INET_ADDRSTRLEN);
+      const std::string peerAddr = std::string(clientIp) + ":" + std::to_string(ntohs(clientAddr.sin_port));
 
       std::lock_guard<std::mutex> lock(m_peersMutex);
       m_peerSockets.push_back(clientSock);
-
       m_threads.emplace_back(&GossipManager::handleConnection, this, clientSock, peerAddr);
     }
   }
@@ -191,19 +201,19 @@ namespace Sidechain
   {
     for (const auto &seed : m_seedNodes)
     {
-      size_t colon = seed.find(':');
-      std::string host = seed.substr(0, colon);
-      uint16_t port = std::stoi(seed.substr(colon + 1));
+      const size_t colon = seed.find(':');
+      const std::string host = seed.substr(0, colon);
+      const uint16_t port = static_cast<uint16_t>(std::stoi(seed.substr(colon + 1)));
 
       while (m_running)
       {
-        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        int sock = BoltHttp::boltSocket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
-        inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+        BoltHttp::boltInetPton(AF_INET, host.c_str(), &addr.sin_addr);
 
-        if (connect(sock, (sockaddr *)&addr, sizeof(addr)) == 0)
+        if (BoltHttp::boltConnect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0)
         {
           std::lock_guard<std::mutex> lock(m_peersMutex);
           m_peerSockets.push_back(sock);
@@ -212,12 +222,10 @@ namespace Sidechain
           std::cout << "GossipManager: Connected to seed " << seed << std::endl;
           break;
         }
-        else
-        {
-          close(sock);
-          std::cerr << "GossipManager: Failed to connect to seed " << seed << ", retrying in 5s..." << std::endl;
-          std::this_thread::sleep_for(std::chrono::seconds(5));
-        }
+
+        BoltHttp::boltClose(sock);
+        std::cerr << "GossipManager: Failed to connect to seed " << seed << ", retrying in 5s..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(5));
       }
     }
   }
@@ -225,21 +233,21 @@ namespace Sidechain
   void GossipManager::handleConnection(int socket, const std::string &peerAddress)
   {
     readLoop(socket, peerAddress);
-    close(socket);
+    BoltHttp::boltClose(socket);
   }
 
   void GossipManager::readLoop(int socket, const std::string &peerAddress)
   {
     while (m_running)
     {
-      uint32_t len;
-      int bytesRead = recv(socket, &len, sizeof(len), 0);
+      uint32_t len = 0;
+      int bytesRead = recvBytes(socket, &len, sizeof(len), 0);
       if (bytesRead <= 0)
         break;
 
       len = ntohl(len);
       std::vector<uint8_t> message(len);
-      bytesRead = recv(socket, message.data(), len, MSG_WAITALL);
+      bytesRead = recvBytes(socket, message.data(), len, MSG_WAITALL);
       if (bytesRead <= 0)
         break;
 
@@ -252,4 +260,4 @@ namespace Sidechain
   {
     return m_firstSeedAddress;
   }
-}
+} // namespace Sidechain
